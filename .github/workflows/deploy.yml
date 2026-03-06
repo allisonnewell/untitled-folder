@@ -1,0 +1,45 @@
+name: Deploy Streamlit App
+
+on:
+  push:
+    branches: [ main, master ]
+  pull_request:
+    branches: [ main, master ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Test imports
+      run: |
+        python -c "from models import ConsumptionSavingsModel; print('Models import successful')"
+        python -c "from visualizations.plots import plot_policy_function; print('Plots import successful')"
+        python -c "from utils.fred_data import FREDDataFetcher; print('Utils import successful')"
+
+  deploy:
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master'
+    steps:
+    - uses: actions/checkout@v3
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: '3.9'
+    - name: Install dependencies
+      run: |
+        python -m pip install --upgrade pip
+        pip install -r requirements.txt
+    - name: Run app in background
+      run: |
+        ./run.sh &
+        sleep 10
+        curl -f http://localhost:8501 || exit 1

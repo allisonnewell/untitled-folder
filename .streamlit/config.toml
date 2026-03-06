@@ -1,0 +1,34 @@
+[theme]
+primaryColor = "#0099ff"
+backgroundColor = "#001a33"
+secondaryBackgroundColor = "#003d66"
+textColor = "#ffffff"
+font = "serif"
+
+[client]
+showErrorDetails = true
+
+[logger]
+level = "warning"
+
+[server]
+# The address where the server will listen for client and browser connections.
+address = "0.0.0.0"
+# The port where the server will listen for client and browser connections.
+port = 8501
+# Enables support for Cross-Origin Request Sharing (CORS) protection
+enableCORS = true
+# Enables support for Cross-Site Request Forgery (XSRF) protection
+enableXsrfProtection = false
+# Max size, in megabytes, for files uploaded with the file_uploader.
+maxUploadSize = 200
+# Max size, in megabytes, of messages that can be sent via the WebSocket connection.
+maxMessageSize = 200
+
+[browser]
+# Internet address where users should point their browsers
+serverAddress = "localhost"
+# Whether to send usage statistics to Streamlit.
+gatherUsageStats = false
+# Port where users should point their browsers
+serverPort = 8501
