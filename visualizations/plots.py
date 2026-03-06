@@ -87,19 +87,15 @@ def plot_policy_function(grid, policy, title="Policy Function",
             text=action_label,
             font=dict(family='Garamond, serif', size=12)
         ),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         hovermode='x unified',
         height=400,
         showlegend=True,
         font=dict(family='Garamond, serif', size=11, color='#ffffff'),
         margin=dict(l=50, r=30, t=50, b=50),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -136,18 +132,14 @@ def plot_value_function(grid, value_fn, title="Value Function",
         title=title,
         xaxis_title=state_label,
         yaxis_title='Value',
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         height=350,
         hovermode='x unified',
         font=dict(family='Garamond, serif', size=10, color='#ffffff'),
         margin=dict(l=50, r=30, t=40, b=40),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -174,14 +166,10 @@ def plot_heatmap(x_grid, y_grid, heatmap_data, title="Heatmap",
         height=450,
         font=dict(family='Garamond, serif', size=11, color='#ffffff'),
         margin=dict(l=60, r=40, t=60, b=60),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -221,15 +209,11 @@ def plot_multiple_series(time_index, data_dict, title="Time Series"):
         height=400,
         showlegend=True,
         font=dict(family='Garamond, serif', size=10, color='#ffffff'),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         margin=dict(l=50, r=30, t=40, b=40),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -262,14 +246,10 @@ def plot_distribution(data, title="Distribution", bins=40):
         showlegend=False,
         font=dict(family='Garamond, serif', size=11, color='#ffffff'),
         margin=dict(l=50, r=30, t=40, b=40),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -307,14 +287,10 @@ def plot_correlation_heatmap(correlation_matrix, labels, title="Correlation Matr
         height=500,
         font=dict(family='Garamond, serif', size=10, color='#ffffff'),
         margin=dict(l=50, r=30, t=40, b=40),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
@@ -398,18 +374,14 @@ def plot_forecast(historical, forecast, forecast_std, title="Forecast", series_n
             text=series_name,
             font=dict(family='Garamond, serif', size=12)
         ),
-        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
-        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False),
+        xaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
+        yaxis=dict(showline=False, showgrid=False, zeroline=False, mirror=False, showspikes=False),
         hovermode='x unified',
         height=400,
         font=dict(family='Garamond, serif', size=11, color='#ffffff'),
         margin=dict(l=50, r=30, t=50, b=50),
         paper_bgcolor='#001a33',
-        plot_bgcolor='#001a33',
-        xaxis_showline=False,
-        yaxis_showline=False,
-        xaxis_zeroline=False,
-        yaxis_zeroline=False
+        plot_bgcolor='#001a33'
     )
     
     return fig
