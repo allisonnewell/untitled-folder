@@ -3,7 +3,7 @@
 # This script configures the app for different deployment environments
 
 # Set default port
-PORT=${PORT:-8501}
+PORT=${PORT:-8502}
 
 # Export environment variables for Streamlit
 export STREAMLIT_SERVER_ADDRESS=0.0.0.0

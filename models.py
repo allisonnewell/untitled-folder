@@ -93,7 +93,19 @@ class ConsumptionSavingsModel:
     a_max : float, maximum assets (default 50)
     """
     
-    def __init__(self, beta, r, gamma, rho, sigma_y, n_a=100, a_min=0.01, a_max=50):
+    def __init__(
+        self,
+        beta,
+        r,
+        gamma,
+        rho,
+        sigma_y,
+        n_a=100,
+        a_min=0.01,
+        a_max=50,
+        y_grid=None,
+        P_y=None,
+    ):
         self.beta = beta
         self.r = r
         self.gamma = gamma
@@ -103,13 +115,31 @@ class ConsumptionSavingsModel:
         self.a_min = a_min
         self.a_max = a_max
         
-        # Discretize income process
-        self.y_grid, self.P_y = tauchen_discretization(rho, sigma_y, n_points=9)
-        self.n_y = len(self.y_grid)
-        self.y_grid = np.exp(self.y_grid)  # Convert to levels
+        # Discretize income process unless a custom Markov chain is supplied
+        if y_grid is not None and P_y is not None:
+            self.y_grid = np.array(y_grid, dtype=float)
+            self.P_y = np.array(P_y, dtype=float)
+
+            if self.P_y.shape[0] != self.P_y.shape[1]:
+                raise ValueError("P_y must be a square transition matrix")
+            if self.P_y.shape[0] != len(self.y_grid):
+                raise ValueError("P_y dimensions must match y_grid length")
+
+            row_sums = self.P_y.sum(axis=1, keepdims=True)
+            if np.any(row_sums <= 0):
+                raise ValueError("Each row of P_y must have positive probability mass")
+            self.P_y = self.P_y / row_sums
+            self.n_y = len(self.y_grid)
+        else:
+            self.y_grid, self.P_y = tauchen_discretization(rho, sigma_y, n_points=9)
+            self.n_y = len(self.y_grid)
+            self.y_grid = np.exp(self.y_grid)  # Convert to levels
         
-        # Asset grid (log-spaced for refinement near zero)
-        self.a_grid = np.logspace(np.log10(a_min), np.log10(a_max), n_a)
+        # Asset grid: log-spaced when strictly positive, linear otherwise
+        if a_min > 0:
+            self.a_grid = np.logspace(np.log10(a_min), np.log10(a_max), n_a)
+        else:
+            self.a_grid = np.linspace(a_min, a_max, n_a)
         
         # Initialize value and policy functions
         self.V = np.zeros((n_a, self.n_y))
@@ -132,18 +162,17 @@ class ConsumptionSavingsModel:
             
             for i_y, y in enumerate(self.y_grid):
                 for i_a, a in enumerate(self.a_grid):
-                    # resources available next period
+                    # resources available this period
                     resource = (1 + self.r) * a + y
-                    if resource <= 0:
-                        # cannot consume
-                        self.V[i_a, i_y] = -1e10
-                        self.policy_c[i_a, i_y] = 0.0
-                        self.policy_a[i_a, i_y] = 0.0
-                        continue
                     
                     # candidate next‑period assets are drawn from grid
                     # ensure a' <= resources (c >=0)
                     feasible_indices = self.a_grid <= resource
+                    if not np.any(feasible_indices):
+                        self.V[i_a, i_y] = -1e10
+                        self.policy_c[i_a, i_y] = 1e-8
+                        self.policy_a[i_a, i_y] = self.a_min
+                        continue
                     a_candidates = self.a_grid[feasible_indices]
                     c_candidates = resource - a_candidates
                     
@@ -174,7 +203,7 @@ class ConsumptionSavingsModel:
             'final_diff': diff
         }
     
-    def simulate(self, T=1000, initial_a=1.0, random_seed=42):
+    def simulate(self, T=1000, initial_a=1.0, random_seed=42, initial_y_state=None):
         """Simulate the model forward"""
         np.random.seed(random_seed)
         
@@ -185,8 +214,12 @@ class ConsumptionSavingsModel:
         
         a_path[0] = initial_a
         
-        # Draw initial income state
-        y_idx = np.random.choice(self.n_y)
+        # Draw or set initial income state
+        if initial_y_state is None:
+            y_idx = np.random.choice(self.n_y)
+        else:
+            y_idx = int(initial_y_state)
+            y_idx = max(0, min(y_idx, self.n_y - 1))
         
         # Interpolation function for policy
         policy_interp = interp1d(self.a_grid, self.policy_c, kind='linear',
@@ -203,7 +236,7 @@ class ConsumptionSavingsModel:
             
             # Next period assets
             a_path[t + 1] = (1 + self.r) * a_path[t] + y - c
-            a_path[t + 1] = np.maximum(a_path[t + 1], 0)
+            a_path[t + 1] = np.maximum(a_path[t + 1], self.a_min)
             
             # Income transition
             y_idx = np.random.choice(self.n_y, p=self.P_y[y_idx, :])
@@ -239,7 +272,20 @@ class RobinsonCrusoeModel:
     n_k : int, capital grid size
     """
     
-    def __init__(self, beta, alpha, delta, gamma, rho, sigma_z, n_k=100):
+    def __init__(
+        self,
+        beta,
+        alpha,
+        delta,
+        gamma,
+        rho,
+        sigma_z,
+        n_k=100,
+        k_min=0.1,
+        k_max=50,
+        z_grid=None,
+        P_z=None,
+    ):
         self.beta = beta
         self.alpha = alpha
         self.delta = delta
@@ -248,14 +294,29 @@ class RobinsonCrusoeModel:
         self.sigma_z = sigma_z
         self.n_k = n_k
         
-        # Discretize TFP process
-        self.z_grid, self.P_z = tauchen_discretization(rho, sigma_z, n_points=9)
-        self.n_z = len(self.z_grid)
-        self.z_grid = np.exp(self.z_grid)  # Convert to levels
-        
+        # Discretize TFP process unless a custom Markov chain is supplied
+        if z_grid is not None and P_z is not None:
+            self.z_grid = np.array(z_grid, dtype=float)
+            self.P_z = np.array(P_z, dtype=float)
+
+            if self.P_z.shape[0] != self.P_z.shape[1]:
+                raise ValueError("P_z must be a square transition matrix")
+            if self.P_z.shape[0] != len(self.z_grid):
+                raise ValueError("P_z dimensions must match z_grid length")
+
+            row_sums = self.P_z.sum(axis=1, keepdims=True)
+            if np.any(row_sums <= 0):
+                raise ValueError("Each row of P_z must have positive probability mass")
+            self.P_z = self.P_z / row_sums
+            self.n_z = len(self.z_grid)
+        else:
+            self.z_grid, self.P_z = tauchen_discretization(rho, sigma_z, n_points=9)
+            self.n_z = len(self.z_grid)
+            self.z_grid = np.exp(self.z_grid)  # Convert to levels
+
         # Capital grid
-        k_min = 0.1
-        k_max = 50
+        self.k_min = k_min
+        self.k_max = k_max
         self.k_grid = np.logspace(np.log10(k_min), np.log10(k_max), n_k)
         
         # Value and policy functions
@@ -310,7 +371,7 @@ class RobinsonCrusoeModel:
         return {'converged': False, 'iterations': max_iter, 'final_diff': diff}
 
     
-    def simulate(self, T=1000, initial_k=1.0, random_seed=42):
+    def simulate(self, T=1000, initial_k=1.0, random_seed=42, initial_z_state=None):
         """Simulate the economy"""
         np.random.seed(random_seed)
         
@@ -321,7 +382,11 @@ class RobinsonCrusoeModel:
         z_path = np.zeros(T)
         
         k_path[0] = initial_k
-        z_idx = np.random.choice(self.n_z)
+        if initial_z_state is None:
+            z_idx = np.random.choice(self.n_z)
+        else:
+            z_idx = int(initial_z_state)
+            z_idx = max(0, min(z_idx, self.n_z - 1))
         
         policy_interp = interp1d(self.k_grid, self.policy_c, kind='linear',
                                 axis=0, bounds_error=False, fill_value='extrapolate')
@@ -338,7 +403,7 @@ class RobinsonCrusoeModel:
             c_path[t] = c
             
             k_next = output + (1 - self.delta) * k_path[t] - c
-            k_next = np.maximum(k_next, 0.01)
+            k_next = np.maximum(k_next, self.k_min)
             k_path[t + 1] = k_next
             
             investment_path[t] = k_next - (1 - self.delta) * k_path[t]
@@ -380,7 +445,21 @@ class LaborSupplyModel:
     n_a : int, asset grid size
     """
     
-    def __init__(self, beta, r, gamma, chi, eta, rho, sigma_w, n_a=80):
+    def __init__(
+        self,
+        beta,
+        r,
+        gamma,
+        chi,
+        eta,
+        rho,
+        sigma_w,
+        n_a=80,
+        a_min=0.01,
+        a_max=50,
+        w_grid=None,
+        P_w=None,
+    ):
         self.beta = beta
         self.r = r
         self.gamma = gamma
@@ -389,14 +468,34 @@ class LaborSupplyModel:
         self.rho = rho
         self.sigma_w = sigma_w
         self.n_a = n_a
+        self.a_min = a_min
+        self.a_max = a_max
         
-        # Discretize wage process
-        self.w_grid, self.P_w = tauchen_discretization(rho, sigma_w, n_points=7)
-        self.n_w = len(self.w_grid)
-        self.w_grid = np.exp(self.w_grid)
+        # Discretize wage process unless a custom Markov chain is supplied
+        if w_grid is not None and P_w is not None:
+            self.w_grid = np.array(w_grid, dtype=float)
+            self.P_w = np.array(P_w, dtype=float)
+
+            if self.P_w.shape[0] != self.P_w.shape[1]:
+                raise ValueError("P_w must be a square transition matrix")
+            if self.P_w.shape[0] != len(self.w_grid):
+                raise ValueError("P_w dimensions must match w_grid length")
+
+            row_sums = self.P_w.sum(axis=1, keepdims=True)
+            if np.any(row_sums <= 0):
+                raise ValueError("Each row of P_w must have positive probability mass")
+            self.P_w = self.P_w / row_sums
+            self.n_w = len(self.w_grid)
+        else:
+            self.w_grid, self.P_w = tauchen_discretization(rho, sigma_w, n_points=7)
+            self.n_w = len(self.w_grid)
+            self.w_grid = np.exp(self.w_grid)
         
         # Asset grid
-        self.a_grid = np.logspace(np.log10(0.01), np.log10(50), n_a)
+        if a_min > 0:
+            self.a_grid = np.logspace(np.log10(a_min), np.log10(a_max), n_a)
+        else:
+            self.a_grid = np.linspace(a_min, a_max, n_a)
         
         # Value and policies
         self.V = np.zeros((n_a, self.n_w))
@@ -423,7 +522,10 @@ class LaborSupplyModel:
                     
                     # Reduced grid search for efficiency
                     l_grid = np.linspace(0, 1, 15)
-                    a_next_grid = np.linspace(0, (1 + self.r) * a + w, 20)
+                    resource_max = (1 + self.r) * a + w
+                    if resource_max < self.a_min:
+                        continue
+                    a_next_grid = np.linspace(self.a_min, resource_max, 20)
                     
                     for l in l_grid:
                         for a_next in a_next_grid:
@@ -443,9 +545,14 @@ class LaborSupplyModel:
                                 best_val = total_val
                                 best_l = l
                                 best_a_next = a_next
+
+                    if not np.isfinite(best_val):
+                        best_l = 0.0
+                        best_a_next = self.a_min
                     
                     # Store results
                     c_opt = (1 + self.r) * a + w * best_l - best_a_next
+                    c_opt = np.maximum(c_opt, 1e-6)
                     V_next = V_interp(best_a_next)
                     EV = self.P_w[i_w, :] @ V_next
                     
@@ -471,7 +578,7 @@ class LaborSupplyModel:
             'final_diff': diff
         }
     
-    def simulate(self, T=1000, initial_a=1.0, random_seed=42):
+    def simulate(self, T=1000, initial_a=1.0, random_seed=42, initial_w_state=None):
         """Simulate labor supply decisions"""
         np.random.seed(random_seed)
         
@@ -481,8 +588,12 @@ class LaborSupplyModel:
         y_path = np.zeros(T)
         w_path = np.zeros(T)
         
-        a_path[0] = initial_a
-        w_idx = np.random.choice(self.n_w)
+        a_path[0] = np.clip(initial_a, self.a_min, self.a_max)
+        if initial_w_state is None:
+            w_idx = np.random.choice(self.n_w)
+        else:
+            w_idx = int(initial_w_state)
+            w_idx = max(0, min(w_idx, self.n_w - 1))
         
         c_interp = interp1d(self.a_grid, self.policy_c, kind='linear',
                            axis=0, bounds_error=False, fill_value='extrapolate')
@@ -501,7 +612,7 @@ class LaborSupplyModel:
             
             c = np.maximum(c, 1e-6)
             l = np.clip(l, 0, 1)
-            a_next = np.maximum(a_next, 0)
+            a_next = np.clip(a_next, self.a_min, self.a_max)
             
             c_path[t] = c
             l_path[t] = l

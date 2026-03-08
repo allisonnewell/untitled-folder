@@ -1,5 +1,5 @@
 """
-Macroeconomic Models Dashboard - Enhanced Version with FRED Integration
+Macroeconomic Models Dashboard
 Interactive Streamlit application for solving and simulating three macro models
 """
 
@@ -12,7 +12,6 @@ from visualizations.plots import (
     plot_multiple_series, plot_heatmap, plot_distribution, plot_forecast
 )
 from utils.export import export_simulation_to_csv, export_policies_to_csv, create_model_summary_json
-from utils.fred_data import FREDDataFetcher, get_sample_calibration, FRED_SERIES
 from utils.moments import compute_moments, compute_correlations, forecast_ar1, get_simulation_summary
 
 # ============================================================================
@@ -23,7 +22,7 @@ import os
 # Configure for GitHub Codespaces or other cloud environments
 if 'GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN' in os.environ or 'CODESPACE_NAME' in os.environ:
     # Running in GitHub Codespaces
-    port = int(os.environ.get('PORT', 8501))
+    port = int(os.environ.get('PORT', 8502))
     os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
     os.environ['STREAMLIT_SERVER_PORT'] = str(port)
     st.set_page_config(
@@ -33,7 +32,7 @@ if 'GITHUB_CODESPACES_PORT_FORWARDING_DOMAIN' in os.environ or 'CODESPACE_NAME' 
     )
 elif os.environ.get('STREAMLIT_SERVER_HEADLESS', 'false').lower() == 'true' or 'PORT' in os.environ:
     # Running in headless mode or with PORT environment variable (common for cloud deployments)
-    port = int(os.environ.get('PORT', 8501))
+    port = int(os.environ.get('PORT', 8502))
     os.environ['STREAMLIT_SERVER_ADDRESS'] = '0.0.0.0'
     os.environ['STREAMLIT_SERVER_PORT'] = str(port)
     st.set_page_config(
@@ -65,6 +64,88 @@ def get_cached_plot(cache_key, plot_func, *args, **kwargs):
     if cache_key not in st.session_state:
         st.session_state[cache_key] = plot_func(*args, **kwargs)
     return st.session_state[cache_key]
+
+
+def parse_two_state_shock_plan(plan_text, horizon):
+    """Parse comma-separated Low/High plan into 0/1 state indices."""
+    mapping = {
+        'l': 0,
+        'low': 0,
+        'h': 1,
+        'high': 1,
+        '0': 0,
+        '1': 1,
+    }
+    tokens = [t.strip().lower() for t in str(plan_text).split(',') if t.strip()]
+    indices = [mapping[t] for t in tokens if t in mapping]
+
+    if not indices:
+        indices = [0]
+
+    while len(indices) < horizon:
+        indices.append(indices[-1])
+
+    return np.array(indices[:horizon], dtype=int)
+
+DEFAULT_CALIBRATION = {
+    'cs': {'beta': 0.95, 'r': 0.03, 'gamma': 2.0},
+    'rc': {'beta': 0.95, 'alpha': 0.33, 'delta': 0.08, 'gamma': 2.0},
+    'ls': {'beta': 0.95, 'r': 0.05, 'gamma': 2.0, 'chi': 1.5, 'eta': 0.8},
+}
+
+MODEL_SIDEBAR_DEFAULTS = {
+    'cs': {
+        'cs_beta': 0.95,
+        'cs_sigma': 2.0,
+        'cs_r': 0.03,
+        'cs_a_min': 0.01,
+        'cs_a_max': 50.0,
+        'cs_n_a': 90,
+        'cs_y_low': 0.8,
+        'cs_y_high': 1.2,
+        'cs_p_stay_low': 0.90,
+        'cs_p_stay_high': 0.90,
+        'cs_sim_len': 100,
+        'cs_init_a': 1.0,
+        'cs_init_income': 'Low',
+        'cs_seed': 42,
+        'cs_forecast_horizon': 10,
+    },
+    'rc': {
+        'rc_beta': 0.95,
+        'rc_sigma': 2.0,
+        'rc_alpha': 0.33,
+        'rc_delta': 0.08,
+        'rc_init_k': 1.0,
+        'rc_k_min': 0.1,
+        'rc_k_max': 50.0,
+        'rc_n_k': 90,
+        'rc_z_low': 0.9,
+        'rc_z_high': 1.1,
+        'rc_p_stay_low': 0.90,
+        'rc_p_stay_high': 0.90,
+        'rc_sim_len': 100,
+        'rc_seed': 42,
+        'rc_forecast_horizon': 10,
+    },
+    'ls': {
+        'ls_beta': 0.95,
+        'ls_sigma': 2.0,
+        'ls_phi': 1.5,
+        'ls_eta': 0.8,
+        'ls_r': 0.05,
+        'ls_n_a': 80,
+        'ls_w_low': 0.8,
+        'ls_w_high': 1.2,
+        'ls_p_stay_low': 0.90,
+        'ls_p_stay_high': 0.90,
+        'ls_sim_len': 100,
+        'ls_init_a': 1.0,
+        'ls_init_wage_state': 'Low',
+        'ls_seed': 42,
+        'ls_forecast_horizon': 10,
+    },
+}
 
 # Custom CSS for enhanced styling - Dark/Navy Theme with Garamond
 st.markdown("""
@@ -167,10 +248,12 @@ st.markdown("""
     
     /* Tab styling */
     .stTabs [data-baseweb="tab-list"] {
-        gap: 2px;
+        gap: 10px;
         background-color: #002b4d;
         border-radius: 8px;
         padding: 5px;
+        margin-top: 12px;
+        margin-bottom: 14px;
     }
     
     .stTabs [data-baseweb="tab"] {
@@ -178,6 +261,11 @@ st.markdown("""
         border-radius: 6px;
         color: #ffffff;
         font-family: 'Garamond', serif;
+        padding: 0.45rem 0.85rem;
+    }
+
+    .panel-spacer {
+        height: 1rem;
     }
     
     .stTabs [aria-selected="true"] {
@@ -237,64 +325,29 @@ st.title("Macroeconomic Models Dashboard")
 st.markdown("""
 Interactive dashboard for solving and simulating three canonical macroeconomic models 
 using **Value Function Iteration (VFI)**.  
-**Download results • Analyze policies • Run simulations • Use FRED data**
+**Download results • Analyze policies • Run simulations**
 """)
 
-# ============================================================================
-# FRED Data Integration
-# ============================================================================
-
-@st.cache_resource
-def get_fred_fetcher():
-    """Initialize FRED data fetcher (cached)."""
-    try:
-        return FREDDataFetcher()
-    except:
-        return None
-
-# Top sidebar section for parameter source
-with st.sidebar.expander("Parameter Settings", expanded=False):
-    param_source = st.selectbox(
-        "Select parameter source:",
-        ["Default", "Conservative", "Historical Average", "Custom FRED Data"]
-    )
-    
-    if param_source == "Custom FRED Data":
-        st.info("""
-        **FRED Data Integration:**
-        Select economic indicators below to calibrate model parameters with real data from the Federal Reserve.
-        No API key required - data is fetched automatically.
-        """)
-        
-        # Initialize FRED fetcher without API key
-        if 'fred_data_fetcher' not in st.session_state:
-            st.session_state.fred_data_fetcher = FREDDataFetcher()
-        
-        st.success("Connected to FRED database")
-        
-        st.markdown("**Available Economic Indicators:**")
-        fred_series_list = ["None"] + [name for name in FRED_SERIES.keys()]
-        
-        # Show sample series
-        col1, col2 = st.columns(2)
-        with col1:
-            st.markdown("**Interest Rates & Prices:**")
-            for name in ["Federal Funds Rate", "Real Interest Rate (10-yr)"]:
-                st.caption(f"• {name}")
-        
-        with col2:
-            st.markdown("**Economic Activity:**")
-            for name in ["Real GDP per Capita", "Unemployment Rate", "Personal Consumption Expenditures"]:
-                st.caption(f"• {name}")
-        
-        st.caption("... and more series available in parameter sections below")
+st.markdown("""
+### Workflow
+1. Select a model in the sidebar (`Model 1`, `Model 2`, or `Model 3`).
+2. Adjust economic parameters in the sidebar.
+3. Click **Solve Model** to run VFI and compute value and policy functions.
+4. Click **Simulate** to generate a 100-200 period path using solved policies.
+5. Review policy graphs, simulated time series, summary statistics, forecast panel, and interpretation.
+""")
 
 st.sidebar.markdown("---")
 
 # Sidebar - Model selection
-model_choice = st.sidebar.radio(
-    "**Select Model**",
-    ["Consumption-Savings", "Robinson Crusoe", "Labor Supply"]
+st.sidebar.markdown("**Section 1: Model Selection**")
+model_choice = st.sidebar.selectbox(
+    "**Step 1: Select Model**",
+    [
+        "Model 1: Consumption-Savings",
+        "Model 2: Robinson Crusoe",
+        "Model 3: Endogenous Labor Supply",
+    ]
 )
 
 st.sidebar.markdown("---")
@@ -302,7 +355,7 @@ st.sidebar.markdown("---")
 # ============================================================================
 # MODEL 1: CONSUMPTION-SAVINGS
 # ============================================================================
-if model_choice == "Consumption-Savings":
+if model_choice == "Model 1: Consumption-Savings":
     st.header("Stochastic Consumption-Savings Model")
     
     col1, col2 = st.columns(2)
@@ -322,116 +375,106 @@ if model_choice == "Consumption-Savings":
         """)
     
     # Sidebar parameters
-    st.sidebar.subheader("Model Parameters")
+    st.sidebar.subheader("Step 2: Adjust Economic Parameters")
     
-    # Load default or sample calibrations
-    calibration = get_sample_calibration(param_source)['cs']
-    
-    # FRED Data integration for parameter selection
-    if param_source == "Custom FRED Data":
-        fred_fetcher = st.session_state.fred_data_fetcher
-        st.sidebar.markdown("**Select FRED Series for Parameters:**")
-        
-        # Interest rate series
-        interest_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                      if FRED_SERIES[name]['use'] == 'Interest Rate']
-        selected_r_series = st.sidebar.selectbox(
-            "Interest Rate (r):", interest_series, key="cs_fred_r"
+    # Load baseline calibration values
+    calibration = DEFAULT_CALIBRATION['cs']
+
+    with st.sidebar.expander("Section 2: Preferences", expanded=False):
+        beta = st.slider(
+            "Discount factor (beta)",
+            0.90,
+            0.99,
+            calibration.get('beta', 0.95),
+            0.01,
+            key="cs_beta",
         )
-        
-        # Income/consumption series for volatility
-        income_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                    if FRED_SERIES[name]['use'] in ['Income', 'Consumption', 'Production']]
-        selected_income_series = st.sidebar.selectbox(
-            "Income Volatility (σ_y):", income_series, key="cs_fred_sigma"
+        sigma = st.slider(
+            "Risk aversion (sigma)",
+            1.0,
+            10.0,
+            calibration.get('gamma', 2.0),
+            0.5,
+            key="cs_sigma",
         )
-        
-        # Persistence from various series
-        persistence_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                         if FRED_SERIES[name]['use'] in ['Production', 'Consumption', 'Income', 'Wages']]
-        selected_rho_series = st.sidebar.selectbox(
-            "Income Persistence (ρ):", persistence_series, key="cs_fred_rho"
+
+    with st.sidebar.expander("Section 3: Technology or Budget", expanded=False):
+        r = st.slider("Interest rate (r)", 0.00, 0.10, calibration.get('r', 0.03), 0.005, key="cs_r")
+        a_min = st.slider("Borrowing limit / asset minimum", -2.0, 1.0, 0.01, 0.01, key="cs_a_min")
+        a_max = st.slider("Asset grid maximum", 5.0, 100.0, 50.0, 1.0, key="cs_a_max")
+        n_a = st.slider("Asset grid resolution", 50, 250, 90, 10, key="cs_n_a")
+
+    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+        y_low = st.slider("Low income value", 0.2, 2.0, 0.8, 0.05, key="cs_y_low")
+        y_high = st.slider("High income value", 0.2, 3.0, 1.2, 0.05, key="cs_y_high")
+        if y_high <= y_low:
+            st.sidebar.warning("High income should be greater than low income. Adjusting automatically.")
+            y_high = y_low + 0.05
+
+        p_stay_low = st.slider("P(stay in low state)", 0.01, 0.99, 0.90, 0.01, key="cs_p_stay_low")
+        p_stay_high = st.slider("P(stay in high state)", 0.01, 0.99, 0.90, 0.01, key="cs_p_stay_high")
+
+        transition_matrix = np.array([
+            [p_stay_low, 1.0 - p_stay_low],
+            [1.0 - p_stay_high, p_stay_high],
+        ])
+        st.sidebar.caption("Transition matrix")
+        st.sidebar.dataframe(
+            pd.DataFrame(
+                transition_matrix,
+                index=["Low", "High"],
+                columns=["Low", "High"],
+            ),
+            use_container_width=True,
         )
-        
-        # Apply calibrations
-        if selected_r_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_r_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_r_series]['series_id']
-                    )
-                    calibration['r'] = max(0.01, min(0.10, params['level_mean'] / 100))
-                    st.sidebar.success(f"r = {calibration['r']:.4f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_r_series}: {str(e)[:50]}")
-        
-        if selected_income_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_income_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_income_series]['series_id']
-                    )
-                    calibration['sigma_y'] = max(0.01, min(0.5, params['std']))
-                    st.sidebar.success(f"σ_y = {calibration['sigma_y']:.4f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_income_series}: {str(e)[:50]}")
-        
-        if selected_rho_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_rho_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_rho_series]['series_id']
-                    )
-                    calibration['rho'] = max(0.0, min(0.99, params['rho']))
-                    st.sidebar.success(f"ρ = {calibration['rho']:.4f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_rho_series}: {str(e)[:50]}")
-        
-        # Show current calibration
-        st.sidebar.markdown("**Current Calibration:**")
-        st.sidebar.write(f"r = {calibration['r']:.4f}")
-        st.sidebar.write(f"ρ = {calibration['rho']:.4f}")
-        st.sidebar.write(f"σ_y = {calibration['sigma_y']:.4f}")
+
+    with st.sidebar.expander("Section 5: Simulation", expanded=False):
+        sim_length = st.slider("Number of periods", 100, 200, 100, 10, key="cs_sim_len")
+        initial_a = st.slider("Initial assets", a_min, a_max, 1.0, 0.1, key="cs_init_a")
+        initial_income_state = st.selectbox("Initial income state", ["Low", "High"], key="cs_init_income")
+        random_seed = st.number_input("Random seed", min_value=0, max_value=100000, value=42, step=1, key="cs_seed")
+        forecast_horizon = st.slider("Forecast horizon", 5, 30, 10, 1, key="cs_forecast_horizon")
+
+    # Keep legacy args for backward compatibility but use custom 2-state process
+    rho = 0.0
+    sigma_y = 0.1
     
-    st.sidebar.markdown("<strong style='color:#00d4ff'>Model Parameters (Use sliders to adjust)</strong>", unsafe_allow_html=True)
-    
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        beta = st.slider("Discount Factor (β)", 0.90, 0.99, calibration.get('beta', 0.95), 0.01, 
-                        help="How much agents value future consumption (closer to 1 = more patient)")
-        r = st.slider("Interest Rate (r)", 0.00, 0.10, calibration.get('r', 0.05), 0.01,
-                     help="Real return on assets (savings/investment rate)")
-        gamma = st.slider("Risk Aversion (γ)", 1.0, 10.0, calibration.get('gamma', 2.0), 0.5,
-                         help="Curvature of utility (higher = more risk-averse)")
-    
-    with col2:
-        rho = st.slider("Income Persistence (ρ)", 0.0, 0.99, calibration.get('rho', 0.9), 0.05,
-                       help="How much income shocks persist (closer to 1 = more persistent)")
-        sigma_y = st.slider("Income Shock Volatility (σ_y)", 0.01, 0.5, calibration.get('sigma_y', 0.1), 0.05,
-                           help="Standard deviation of income shocks (uncertainty)")
-        n_a = st.slider("Asset Grid Resolution", 50, 200, 70, 10,
-                       help="Number of discrete asset points (more points = higher accuracy, slower solve)")
-    
-    # Markov transition matrix visualization
-    with st.sidebar.expander("Markov Transition Matrix (Income States)", expanded=False):
-        st.markdown("**Transition Probabilities**")
-        st.caption("Shows probability of moving between income states each period")
-        # Create simple display of P matrix pattern
-        st.write(f"Persistence (main diagonal): {calibration.get('rho', 0.9):.2%}")
-        st.write(f"Income shocks follow AR(1) with correlation {calibration.get('rho', 0.9):.3f}")
-    
-    st.sidebar.markdown("---")
-    
+    solve_clicked = False
+    simulate_clicked = False
+    reset_clicked = False
+    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
+        solve_clicked = st.button("Solve model", key="cs_solve", use_container_width=True)
+        simulate_clicked = st.button("Simulate path", key="cs_simulate_sidebar", use_container_width=True)
+        reset_clicked = st.button("Reset to defaults", key="cs_reset_defaults", use_container_width=True)
+
+    if reset_clicked:
+        for key, value in MODEL_SIDEBAR_DEFAULTS['cs'].items():
+            st.session_state[key] = value
+        st.session_state.pop('cs_model', None)
+        st.session_state.pop('cs_result', None)
+        st.session_state.pop('cs_sim', None)
+        st.rerun()
+
     # Solve model
-    if st.sidebar.button("Solve Model", key="cs_solve", use_container_width=True):
+    if solve_clicked:
         with st.spinner("Solving Consumption-Savings model with VFI..."):
             try:
                 model = ConsumptionSavingsModel(
-                    beta=beta, r=r, rho=rho, sigma_y=sigma_y, gamma=gamma, n_a=n_a
+                    beta=beta,
+                    r=r,
+                    rho=rho,
+                    sigma_y=sigma_y,
+                    gamma=sigma,
+                    n_a=n_a,
+                    a_min=a_min,
+                    a_max=a_max,
+                    y_grid=np.array([y_low, y_high]),
+                    P_y=transition_matrix,
                 )
                 result = model.solve(verbose=False)
                 st.session_state.cs_model = model
                 st.session_state.cs_result = result
+                st.session_state.pop('cs_sim', None)
                 if result.get('converged'):
                     st.success("Consumption-Savings model solved (converged)")
                 else:
@@ -440,6 +483,20 @@ if model_choice == "Consumption-Savings":
                 st.error(f"Error solving model: {e}")
                 import traceback
                 st.text(traceback.format_exc())
+
+    if simulate_clicked:
+        if 'cs_model' not in st.session_state:
+            st.warning("Solve the model first before simulating.")
+        else:
+            with st.spinner("Simulating path..."):
+                init_idx = 0 if initial_income_state == "Low" else 1
+                st.session_state.cs_sim = st.session_state.cs_model.simulate(
+                    T=sim_length,
+                    initial_a=initial_a,
+                    random_seed=int(random_seed),
+                    initial_y_state=init_idx,
+                )
+            st.success("Simulation complete.")
     
     # Display results
     if 'cs_model' in st.session_state:
@@ -478,12 +535,141 @@ if model_choice == "Consumption-Savings":
             </div>
             """, unsafe_allow_html=True)
         
+        st.subheader("Step 5: Model Output")
+
+        st.markdown("### 1. Model Description")
+        st.markdown(
+            "State variables: assets and income state. "
+            "Choice variables: consumption and next-period assets. "
+            "Shock type: two-state Markov income shock. "
+            "Bellman intuition: the household trades off current utility from consumption "
+            "against continuation value from carrying assets into future uncertain income states."
+        )
+
+        st.markdown("### 2. Policy Functions")
+        shock_labels = ["Low Income State", "High Income State"] if model.n_y == 2 else None
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = get_cached_plot(
+                'cs_policy_a_ordered',
+                plot_policy_function,
+                model.a_grid, model.policy_a,
+                title="Savings Policy a'(a, z)",
+                state_label="Assets (a)",
+                action_label="Next Assets (a')",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            fig = get_cached_plot(
+                'cs_policy_c_ordered',
+                plot_policy_function,
+                model.a_grid, model.policy_c,
+                title="Consumption Policy c(a, z)",
+                state_label="Assets (a)",
+                action_label="Consumption (c)",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 3. Simulation Plots")
+        if 'cs_sim' in st.session_state:
+            sim = st.session_state.cs_sim
+            t_idx = np.arange(len(sim['c']))
+            fig = plot_multiple_series(
+                t_idx,
+                {
+                    'Consumption': sim['c'],
+                    'Savings/Assets': sim['a'][:-1],
+                    'Income': sim['y'],
+                },
+                title="Simulated Paths"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation from sidebar Section 6 to view simulation plots.")
+
+        st.markdown("### 4. Moments Table")
+        if 'cs_sim' in st.session_state:
+            sim = st.session_state.cs_sim
+            rows = []
+            for name, series in [
+                ("Consumption", sim['c']),
+                ("Assets", sim['a'][:-1]),
+                ("Income", sim['y']),
+            ]:
+                moms = compute_moments(series)
+                corr_val = 1.0 if name == "Income" else compute_correlations(series, sim['y'], name, "Income")['correlation']
+                rows.append({
+                    'Series': name,
+                    'Mean': round(moms['mean'], 4),
+                    'Variance': round(moms['variance'], 4),
+                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
+                    'Corr with Income': round(corr_val, 4),
+                })
+            st.table(pd.DataFrame(rows))
+        else:
+            st.info("Run simulation to compute moments table.")
+
+        st.markdown("### 5. Forecast Panel")
+        if 'cs_sim' in st.session_state:
+            sim = st.session_state.cs_sim
+            forecast_len = 10
+            plan_text = st.text_input(
+                "Enter next shocks (comma-separated Low/High)",
+                value="Low,High,High,Low",
+                key="cs_forecast_shock_plan",
+            )
+            shock_idx = parse_two_state_shock_plan(plan_text, forecast_len)
+            a_now = float(sim['a'][-1])
+            c_fore, a_fore, y_fore = [], [], []
+
+            for idx in shock_idx:
+                y_t = float(model.y_grid[idx])
+                c_t = float(np.interp(a_now, model.a_grid, model.policy_c[:, idx]))
+                c_t = max(c_t, 1e-6)
+                a_next = (1 + model.r) * a_now + y_t - c_t
+                a_next = max(a_next, model.a_min)
+                c_fore.append(c_t)
+                a_fore.append(a_next)
+                y_fore.append(y_t)
+                a_now = a_next
+
+            fig = plot_multiple_series(
+                np.arange(forecast_len),
+                {'Consumption Forecast': c_fore, 'Assets Forecast': a_fore, 'Income Shock Path': y_fore},
+                title="10-Period Conditional Forecast"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation first; forecast starts from latest simulated state.")
+
+        st.markdown("### 6. Economic Summary Text")
+        if 'cs_sim' in st.session_state:
+            sim = st.session_state.cs_sim
+            c_mean = np.mean(sim['c'])
+            a_mean = np.mean(sim['a'][:-1])
+            c_ac = compute_moments(sim['c'])['autocorr_lag1']
+            cy = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")['correlation']
+            st.markdown(
+                f"With current parameters, average consumption is **{c_mean:.3f}** and average assets are **{a_mean:.3f}**. "
+                f"Consumption persistence is **{c_ac:.3f}** at lag 1, and the correlation between consumption and income is **{cy:.3f}**. "
+                f"This indicates {'strong' if abs(cy) > 0.5 else 'moderate'} co-movement with income under the selected shock process."
+            )
+        else:
+            st.info("Run simulation to generate dynamic economic summary text.")
+
+        st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
+
         # Tabs for different views
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                                                "Simulation", "Analysis", "Moments", "Forecasts", "Download"])
+                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
         
         with tab1:
             st.subheader("Policy Functions")
+            shock_labels = ["Low Income State", "High Income State"] if model.n_y == 2 else None
             col1, col2 = st.columns(2)
             with col1:
                 fig = get_cached_plot(
@@ -493,7 +679,7 @@ if model_choice == "Consumption-Savings":
                     title="Optimal Savings Policy: a'(a)",
                     state_label="Current Assets (a)",
                     action_label="Next Period Assets (a')",
-                    shock_labels=["Low Income State", "Medium Income State", "High Income State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -506,7 +692,7 @@ if model_choice == "Consumption-Savings":
                     title="Optimal Consumption Policy: c(a)",
                     state_label="Current Assets (a)",
                     action_label="Consumption (c)",
-                    shock_labels=["Low Income State", "Medium Income State", "High Income State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -524,26 +710,34 @@ if model_choice == "Consumption-Savings":
             st.plotly_chart(fig, use_container_width=True)
         
         with tab3:
-            st.subheader("Simulate Economy")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                sim_length = st.slider("Simulation Length", 100, 5000, 500, 100, key="cs_sim_len")
-            with col2:
-                initial_a = st.slider("Initial Asset Level", 0.1, 10.0, 1.0, 0.1, key="cs_init_a")
-            with col3:
-                random_seed = st.slider("Random Seed", 0, 10000, 42, 1, key="cs_seed")
-            
-            if st.button("Run Simulation", key="cs_run_sim", use_container_width=True):
-                with st.spinner("Running simulation..."):
-                    sim = model.simulate(T=sim_length, initial_a=initial_a, 
-                                       random_seed=int(random_seed))
-                    st.session_state.cs_sim = sim
+            st.subheader("Step 4: Simulate")
+            init_idx = 0 if initial_income_state == "Low" else 1
+            st.caption(
+                f"Setup: T={sim_length}, initial assets={initial_a:.2f}, "
+                f"initial income state={initial_income_state}, seed={int(random_seed)}"
+            )
             
             if 'cs_sim' in st.session_state:
                 sim = st.session_state.cs_sim
                 time_idx = np.arange(len(sim['c']))
-                
-                # Time series plot
+
+                st.markdown("**Simulated Consumption Path**")
+                fig_c_path = plot_simulated_path(
+                    time_idx,
+                    {'Consumption': sim['c']},
+                    title="Simulated Consumption Path"
+                )
+                st.plotly_chart(fig_c_path, use_container_width=True)
+
+                st.markdown("**Simulated Asset Path**")
+                fig_a_path = plot_simulated_path(
+                    time_idx,
+                    {'Assets': sim['a'][:-1]},
+                    title="Simulated Asset Path"
+                )
+                st.plotly_chart(fig_a_path, use_container_width=True)
+
+                # Combined path for context
                 fig = plot_multiple_series(
                     time_idx,
                     {'Consumption': sim['c'], 'Assets': sim['a'][:-1], 'Income': sim['y'][:-1]},
@@ -551,18 +745,29 @@ if model_choice == "Consumption-Savings":
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Statistics
-                st.markdown("**Simulation Statistics:**")
+                # Assignment-aligned statistics
+                st.markdown("**Required Summary Statistics:**")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Avg Consumption", f"{np.mean(sim['c']):.3f}")
+                    st.metric("Mean Consumption", f"{np.mean(sim['c']):.3f}")
                 with col2:
-                    st.metric("Avg Assets", f"{np.mean(sim['a']):.3f}")
+                    st.metric("Variance Consumption", f"{np.var(sim['c']):.3f}")
                 with col3:
-                    st.metric("Std Consumption", f"{np.std(sim['c']):.3f}")
+                    st.metric("Mean Assets", f"{np.mean(sim['a'][:-1]):.3f}")
                 with col4:
-                    savings_rate = 1.0 - (np.mean(sim['c']) / np.mean(sim['y'][:-1]))
-                    st.metric("Avg Savings Rate", f"{savings_rate:.1%}")
+                    st.metric("Variance Assets", f"{np.var(sim['a'][:-1]):.3f}")
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Autocorr c(1)", f"{compute_moments(sim['c'])['autocorr_lag1']:.3f}")
+                with col2:
+                    st.metric("Autocorr a(1)", f"{compute_moments(sim['a'][:-1])['autocorr_lag1']:.3f}")
+                with col3:
+                    corr_ca = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")
+                    st.metric("Corr(c, y)", f"{corr_ca['correlation']:.3f}")
+                with col4:
+                    corr_ay = compute_correlations(sim['a'][:-1], sim['y'], "Assets", "Income")
+                    st.metric("Corr(a, y)", f"{corr_ay['correlation']:.3f}")
                 
                 # Dynamic narrative using computed moments
                 cons_moms = compute_moments(sim['c'])
@@ -615,7 +820,7 @@ if model_choice == "Consumption-Savings":
                 st.info("Run a simulation first to see distributions")
         
         with tab5:
-            st.subheader("� Summary Statistics & Moments")
+            st.subheader("Summary Statistics & Moments")
             
             if 'cs_sim' in st.session_state:
                 sim = st.session_state.cs_sim
@@ -655,28 +860,28 @@ if model_choice == "Consumption-Savings":
                 st.info("Run a simulation first to see moments")
         
         with tab6:
-            st.subheader("Forecasts (AR(1) Model)")
+            st.subheader("Forecast Panel (AR(1) Model)")
             
             if 'cs_sim' in st.session_state:
                 sim = st.session_state.cs_sim
                 
                 # Forecast consumption
-                st.write("**Consumption Forecast (12 periods ahead)**")
-                c_forecast, c_std = forecast_ar1(sim['c'], periods_ahead=12)
+                st.write(f"**Consumption Forecast ({forecast_horizon} periods ahead)**")
+                c_forecast, c_std = forecast_ar1(sim['c'], periods_ahead=int(forecast_horizon))
                 fig_c = plot_forecast(sim['c'][-100:], c_forecast, c_std, 
                                      title="Consumption Forecast", series_name="Consumption")
                 st.plotly_chart(fig_c, use_container_width=True)
                 
                 # Forecast assets
-                st.write("**Asset Forecast (12 periods ahead)**")
-                a_forecast, a_std = forecast_ar1(sim['a'][:-1], periods_ahead=12)
+                st.write(f"**Asset Forecast ({forecast_horizon} periods ahead)**")
+                a_forecast, a_std = forecast_ar1(sim['a'][:-1], periods_ahead=int(forecast_horizon))
                 fig_a = plot_forecast(sim['a'][:-1][-100:], a_forecast, a_std,
                                      title="Asset Forecast", series_name="Assets")
                 st.plotly_chart(fig_a, use_container_width=True)
                 
                 # Forecast income
-                st.write("**Income Forecast (12 periods ahead)**")
-                y_forecast, y_std = forecast_ar1(sim['y'], periods_ahead=12)
+                st.write(f"**Income Forecast ({forecast_horizon} periods ahead)**")
+                y_forecast, y_std = forecast_ar1(sim['y'], periods_ahead=int(forecast_horizon))
                 fig_y = plot_forecast(sim['y'][-100:], y_forecast, y_std,
                                      title="Income Forecast", series_name="Income")
                 st.plotly_chart(fig_y, use_container_width=True)
@@ -684,7 +889,7 @@ if model_choice == "Consumption-Savings":
                 st.info("Run a simulation first to see forecasts")
         
         with tab7:
-            st.subheader("�📥 Download Results")
+            st.subheader("Download Results")
             
             col1, col2, col3 = st.columns(3)
             
@@ -721,7 +926,7 @@ if model_choice == "Consumption-Savings":
                     json_summary = create_model_summary_json(model, result)
                 
                 st.download_button(
-                    label="📋 Download Summary (JSON)",
+                    label="Download Summary (JSON)",
                     data=json_summary,
                     file_name="cs_summary.json",
                     mime="application/json"
@@ -730,7 +935,7 @@ if model_choice == "Consumption-Savings":
 # ============================================================================
 # MODEL 2: ROBINSON CRUSOE
 # ============================================================================
-elif model_choice == "Robinson Crusoe":
+elif model_choice == "Model 2: Robinson Crusoe":
     st.header("Robinson Crusoe Production Economy")
     
     col1, col2 = st.columns(2)
@@ -750,135 +955,95 @@ elif model_choice == "Robinson Crusoe":
         """)
     
     # Sidebar parameters
-    st.sidebar.subheader("Model Parameters")
-    
-    # Load default or sample calibrations
-    calibration = get_sample_calibration(param_source)['rc']
-    
-    # FRED Data integration
-    if param_source == "Custom FRED Data":
-        fred_fetcher = st.session_state.fred_data_fetcher
-        st.sidebar.markdown("**Select FRED Series for Parameters:**")
-        
-        # Capital share from productivity data
-        productivity_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                          if FRED_SERIES[name]['use'] == 'Productivity']
-        selected_alpha_series = st.sidebar.selectbox(
-            "Capital Share (α):", productivity_series, key="rc_fred_alpha"
+    st.sidebar.subheader("Step 2: Adjust Economic Parameters")
+
+    calibration = DEFAULT_CALIBRATION['rc']
+
+    with st.sidebar.expander("Section 2: Preferences", expanded=False):
+        beta = st.slider("Discount factor (beta)", 0.90, 0.99, calibration.get('beta', 0.95), 0.01, key="rc_beta")
+        sigma = st.slider("Risk aversion (sigma)", 1.0, 10.0, calibration.get('gamma', 2.0), 0.5, key="rc_sigma")
+
+    with st.sidebar.expander("Section 3: Technology or Budget", expanded=False):
+        alpha = st.slider("Capital share (alpha)", 0.20, 0.50, calibration.get('alpha', 0.33), 0.01, key="rc_alpha")
+        delta = st.slider("Depreciation rate (delta)", 0.03, 0.20, calibration.get('delta', 0.08), 0.01, key="rc_delta")
+        initial_k = st.slider("Initial capital", 0.1, 20.0, 1.0, 0.1, key="rc_init_k")
+        k_min = st.slider("Capital grid minimum", 0.05, 5.0, 0.1, 0.05, key="rc_k_min")
+        k_max = st.slider("Capital grid maximum", 10.0, 150.0, 50.0, 1.0, key="rc_k_max")
+        if k_max <= k_min:
+            st.sidebar.warning("Capital grid maximum must exceed minimum. Adjusting maximum.")
+            k_max = k_min + 1.0
+        n_k = st.slider("Capital grid resolution", 50, 250, 90, 10, key="rc_n_k")
+
+    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+        z_low = st.slider("Low TFP", 0.3, 1.5, 0.9, 0.05, key="rc_z_low")
+        z_high = st.slider("High TFP", 0.5, 2.5, 1.1, 0.05, key="rc_z_high")
+        if z_high <= z_low:
+            st.sidebar.warning("High TFP should exceed low TFP. Adjusting automatically.")
+            z_high = z_low + 0.05
+
+        p_stay_low = st.slider("Probability of staying in low TFP", 0.01, 0.99, 0.90, 0.01, key="rc_p_stay_low")
+        p_stay_high = st.slider("Probability of staying in high TFP", 0.01, 0.99, 0.90, 0.01, key="rc_p_stay_high")
+
+        tfp_transition = np.array([
+            [p_stay_low, 1.0 - p_stay_low],
+            [1.0 - p_stay_high, p_stay_high],
+        ])
+        st.sidebar.caption("TFP transition matrix")
+        st.sidebar.dataframe(
+            pd.DataFrame(
+                tfp_transition,
+                index=["Low", "High"],
+                columns=["Low", "High"],
+            ),
+            use_container_width=True,
         )
-        
-        # Depreciation from investment data
-        investment_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                        if FRED_SERIES[name]['use'] == 'Investment']
-        selected_delta_series = st.sidebar.selectbox(
-            "Depreciation (δ):", investment_series, key="rc_fred_delta"
-        )
-        
-        # TFP shocks from productivity/production data
-        production_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                        if FRED_SERIES[name]['use'] in ['Production', 'Productivity']]
-        selected_tfp_series = st.sidebar.selectbox(
-            "TFP Volatility (σ_z):", production_series, key="rc_fred_sigma_z"
-        )
-        
-        # Persistence from production data
-        selected_rho_series = st.sidebar.selectbox(
-            "TFP Persistence (ρ):", production_series, key="rc_fred_rho"
-        )
-        
-        # Apply calibrations
-        if selected_alpha_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_alpha_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_alpha_series]['series_id']
-                    )
-                    calibration['alpha'] = max(0.25, min(0.40, params['level_mean'] / 100))
-                    st.sidebar.success(f"α = {calibration['alpha']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_alpha_series}: {str(e)[:40]}")
-        
-        if selected_delta_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_delta_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_delta_series]['series_id']
-                    )
-                    calibration['delta'] = max(0.05, min(0.15, params['std'] * 2))
-                    st.sidebar.success(f"δ = {calibration['delta']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_delta_series}: {str(e)[:40]}")
-        
-        if selected_tfp_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_tfp_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_tfp_series]['series_id']
-                    )
-                    calibration['sigma_z'] = max(0.01, min(0.3, params['std']))
-                    st.sidebar.success(f"σ_z = {calibration['sigma_z']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_tfp_series}: {str(e)[:40]}")
-        
-        if selected_rho_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_rho_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_rho_series]['series_id']
-                    )
-                    calibration['rho'] = max(0.0, min(0.99, params['rho']))
-                    st.sidebar.success(f"ρ = {calibration['rho']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_rho_series}: {str(e)[:40]}")
-        
-        # Show current calibration
-        st.sidebar.markdown("**Current Calibration:**")
-        st.sidebar.write(f"α = {calibration['alpha']:.3f}")
-        st.sidebar.write(f"δ = {calibration['delta']:.3f}")
-        st.sidebar.write(f"ρ = {calibration['rho']:.3f}")
-        st.sidebar.write(f"σ_z = {calibration['sigma_z']:.3f}")
+
+    with st.sidebar.expander("Section 5: Simulation", expanded=False):
+        sim_length = st.slider("Number of periods", 100, 300, 100, 10, key="rc_sim_len")
+        random_seed = st.number_input("Random seed", min_value=0, max_value=100000, value=42, step=1, key="rc_seed")
+        forecast_horizon = st.slider("Forecast horizon", 5, 30, 10, 1, key="rc_forecast_horizon")
+
+    # Kept for compatibility with constructor signature when using custom TFP chain
+    rho = 0.0
+    sigma_z = 0.1
     
-    st.sidebar.markdown("<strong style='color:#00d4ff'>Model Parameters (Use sliders to adjust)</strong>", unsafe_allow_html=True)
-    
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        beta = st.slider("Discount Factor (β)", 0.90, 0.99, calibration.get('beta', 0.95), 0.01, 
-                        key="rc_beta", help="How much the firm values future production")
-        alpha = st.slider("Capital Share (α)", 0.2, 0.5, calibration.get('alpha', 0.33), 0.05,
-                         help="Output elasticity to capital stock")
-        delta = st.slider("Depreciation Rate (δ)", 0.05, 0.15, calibration.get('delta', 0.1), 0.01,
-                         help="Annual capital depreciation rate")
-        gamma = st.slider("Risk Aversion (γ)", 1.0, 10.0, calibration.get('gamma', 2.0), 0.5,
-                         key="rc_gamma", help="Curvature of utility function")
-    
-    with col2:
-        rho = st.slider("TFP Persistence (ρ)", 0.0, 0.99, calibration.get('rho', 0.9), 0.05, 
-                       key="rc_rho", help="How much productivity shocks persist")
-        sigma_z = st.slider("TFP Shock Volatility (σ_z)", 0.01, 0.3, calibration.get('sigma_z', 0.1), 0.05,
-                           help="Standard deviation of productivity shocks")
-        n_k = st.slider("Capital Grid Resolution", 50, 200, 70, 10,
-                       help="Number of discrete capital points")
-    
-    # Markov transition matrix visualization
-    with st.sidebar.expander("Markov Transition Matrix (Productivity States)", expanded=False):
-        st.markdown("**TFP Transition Probabilities**")
-        st.caption("Shows probability of moving between productivity states each period")
-        st.write(f"Persistence (main diagonal): {calibration.get('rho', 0.9):.2%}")
-        st.write(f"Productivity shocks follow AR(1) with correlation {calibration.get('rho', 0.9):.3f}")
-    
-    st.sidebar.markdown("---")
-    
+    solve_clicked = False
+    simulate_clicked = False
+    reset_clicked = False
+    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
+        solve_clicked = st.button("Solve model", key="rc_solve", use_container_width=True)
+        simulate_clicked = st.button("Simulate path", key="rc_simulate_sidebar", use_container_width=True)
+        reset_clicked = st.button("Reset to defaults", key="rc_reset_defaults", use_container_width=True)
+
+    if reset_clicked:
+        for key, value in MODEL_SIDEBAR_DEFAULTS['rc'].items():
+            st.session_state[key] = value
+        st.session_state.pop('rc_model', None)
+        st.session_state.pop('rc_result', None)
+        st.session_state.pop('rc_sim', None)
+        st.rerun()
+
     # Solve model
-    if st.sidebar.button("Solve Model", key="rc_solve", use_container_width=True):
+    if solve_clicked:
         with st.spinner("Solving Robinson Crusoe model with VFI..."):
             try:
                 model = RobinsonCrusoeModel(
-                    beta=beta, alpha=alpha, delta=delta, rho=rho, 
-                    sigma_z=sigma_z, gamma=gamma, n_k=n_k
+                    beta=beta,
+                    alpha=alpha,
+                    delta=delta,
+                    rho=rho,
+                    sigma_z=sigma_z,
+                    gamma=sigma,
+                    n_k=n_k,
+                    k_min=k_min,
+                    k_max=k_max,
+                    z_grid=np.array([z_low, z_high]),
+                    P_z=tfp_transition,
                 )
                 result = model.solve(verbose=False)
                 st.session_state.rc_model = model
                 st.session_state.rc_result = result
+                st.session_state.pop('rc_sim', None)
                 if result.get('converged'):
                     st.success("Robinson Crusoe model solved (converged)")
                 else:
@@ -887,6 +1052,19 @@ elif model_choice == "Robinson Crusoe":
                 st.error(f"Error solving model: {e}")
                 import traceback
                 st.text(traceback.format_exc())
+
+    if simulate_clicked:
+        if 'rc_model' not in st.session_state:
+            st.warning("Solve the model first before simulating.")
+        else:
+            with st.spinner("Simulating path..."):
+                st.session_state.rc_sim = st.session_state.rc_model.simulate(
+                    T=sim_length,
+                    initial_k=initial_k,
+                    random_seed=int(random_seed),
+                    initial_z_state=0,
+                )
+            st.success("Simulation complete.")
     
     # Display results
     if 'rc_model' in st.session_state:
@@ -927,12 +1105,143 @@ elif model_choice == "Robinson Crusoe":
             </div>
             """, unsafe_allow_html=True)
         
+        st.subheader("Step 5: Model Output")
+
+        st.markdown("### 1. Model Description")
+        st.markdown(
+            "State variables: capital and TFP state. "
+            "Choice variables: consumption and next-period capital. "
+            "Shock type: two-state Markov TFP shock. "
+            "Bellman intuition: the planner allocates output between consumption and investment to maximize "
+            "current utility plus discounted continuation value under future productivity uncertainty."
+        )
+
+        st.markdown("### 2. Policy Functions")
+        shock_labels = ["Low TFP", "High TFP"] if model.n_z == 2 else None
+        col1, col2 = st.columns(2)
+        with col1:
+            fig = get_cached_plot(
+                'rc_policy_k_ordered',
+                plot_policy_function,
+                model.k_grid, model.policy_k,
+                title="Capital Policy k'(k, z)",
+                state_label="Capital (k)",
+                action_label="Next Capital (k')",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            fig = get_cached_plot(
+                'rc_policy_c_ordered',
+                plot_policy_function,
+                model.k_grid, model.policy_c,
+                title="Consumption Policy c(k, z)",
+                state_label="Capital (k)",
+                action_label="Consumption (c)",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        st.markdown("### 3. Simulation Plots")
+        if 'rc_sim' in st.session_state:
+            sim = st.session_state.rc_sim
+            t_idx = np.arange(len(sim['c']))
+            fig = plot_multiple_series(
+                t_idx,
+                {
+                    'Consumption': sim['c'],
+                    'Capital': sim['k'][:-1],
+                    'Output': sim['output'],
+                },
+                title="Simulated Paths"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation from sidebar Section 6 to view simulation plots.")
+
+        st.markdown("### 4. Moments Table")
+        if 'rc_sim' in st.session_state:
+            sim = st.session_state.rc_sim
+            rows = []
+            for name, series in [
+                ("Output", sim['output']),
+                ("Consumption", sim['c']),
+                ("Capital", sim['k'][:-1]),
+            ]:
+                moms = compute_moments(series)
+                corr_val = 1.0 if name == "Output" else compute_correlations(series, sim['output'], name, "Output")['correlation']
+                rows.append({
+                    'Series': name,
+                    'Mean': round(moms['mean'], 4),
+                    'Variance': round(moms['variance'], 4),
+                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
+                    'Corr with Output': round(corr_val, 4),
+                })
+            st.table(pd.DataFrame(rows))
+        else:
+            st.info("Run simulation to compute moments table.")
+
+        st.markdown("### 5. Forecast Panel")
+        if 'rc_sim' in st.session_state:
+            sim = st.session_state.rc_sim
+            forecast_len = 10
+            plan_text = st.text_input(
+                "Enter next shocks (comma-separated Low/High)",
+                value="Low,High,High,Low",
+                key="rc_forecast_shock_plan",
+            )
+            shock_idx = parse_two_state_shock_plan(plan_text, forecast_len)
+            k_now = float(sim['k'][-1])
+            c_fore, k_fore, y_fore = [], [], []
+
+            for idx in shock_idx:
+                z_t = float(model.z_grid[idx])
+                y_t = float(model.production_function(k_now, z_t))
+                c_t = float(np.interp(k_now, model.k_grid, model.policy_c[:, idx]))
+                k_next = float(np.interp(k_now, model.k_grid, model.policy_k[:, idx]))
+                c_t = max(c_t, 1e-6)
+                k_next = max(k_next, model.k_min)
+                c_fore.append(c_t)
+                k_fore.append(k_next)
+                y_fore.append(y_t)
+                k_now = k_next
+
+            fig = plot_multiple_series(
+                np.arange(forecast_len),
+                {'Consumption Forecast': c_fore, 'Capital Forecast': k_fore, 'Output Forecast': y_fore},
+                title="10-Period Conditional Forecast"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation first; forecast starts from latest simulated state.")
+
+        st.markdown("### 6. Economic Summary Text")
+        if 'rc_sim' in st.session_state:
+            sim = st.session_state.rc_sim
+            y_mean = np.mean(sim['output'])
+            c_mean = np.mean(sim['c'])
+            k_mean = np.mean(sim['k'][:-1])
+            cy = compute_correlations(sim['c'], sim['output'], "Consumption", "Output")['correlation']
+            ky = compute_correlations(sim['k'][:-1], sim['output'], "Capital", "Output")['correlation']
+            st.markdown(
+                f"Average output is **{y_mean:.3f}**, with consumption at **{c_mean:.3f}** and capital at **{k_mean:.3f}**. "
+                f"The consumption-output correlation is **{cy:.3f}** and capital-output correlation is **{ky:.3f}**, "
+                f"which indicates {'strong' if (abs(cy) > 0.5 or abs(ky) > 0.5) else 'moderate'} business-cycle co-movement."
+            )
+        else:
+            st.info("Run simulation to generate dynamic economic summary text.")
+
+        st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
+
         # Tabs
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                                                "Simulation", "Analysis", "Moments", "Forecasts", "Download"])
+                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
         
         with tab1:
             st.subheader("Policy Functions")
+            shock_labels = ["Low TFP", "High TFP"] if model.n_z == 2 else None
             col1, col2 = st.columns(2)
             with col1:
                 fig = get_cached_plot(
@@ -942,7 +1251,7 @@ elif model_choice == "Robinson Crusoe":
                     title="Optimal Capital Investment Policy: k'(k)",
                     state_label="Current Capital Stock (k)",
                     action_label="Next Period Capital (k')",
-                    shock_labels=["Low Productivity State", "Medium Productivity State", "High Productivity State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -955,7 +1264,7 @@ elif model_choice == "Robinson Crusoe":
                     title="Optimal Consumption Policy: c(k)",
                     state_label="Current Capital Stock (k)",
                     action_label="Consumption (c)",
-                    shock_labels=["Low Productivity State", "Medium Productivity State", "High Productivity State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -973,26 +1282,37 @@ elif model_choice == "Robinson Crusoe":
             st.plotly_chart(fig, use_container_width=True)
         
         with tab3:
-            st.subheader("Simulate Economy")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                sim_length = st.slider("Simulation Length", 100, 5000, 500, 100, key="rc_sim_len")
-            with col2:
-                initial_k = st.slider("Initial Capital", 0.5, 5.0, 1.0, 0.5, key="rc_init_k")
-            with col3:
-                random_seed = st.slider("Random Seed", 0, 10000, 42, 1, key="rc_seed")
-            
-            if st.button("Run Simulation", key="rc_run_sim", use_container_width=True):
-                with st.spinner("Running simulation..."):
-                    sim = model.simulate(T=sim_length, initial_k=initial_k,
-                                       random_seed=int(random_seed))
-                    st.session_state.rc_sim = sim
+            st.subheader("Step 4: Simulate")
+            st.caption(f"Setup: T={sim_length}, initial capital={initial_k:.2f}, seed={int(random_seed)}")
             
             if 'rc_sim' in st.session_state:
                 sim = st.session_state.rc_sim
                 time_idx = np.arange(len(sim['c']))
                 
-                # Time series
+                st.markdown("**Simulated Output**")
+                fig_out = plot_simulated_path(
+                    time_idx,
+                    {'Output': sim['output']},
+                    title="Simulated Output"
+                )
+                st.plotly_chart(fig_out, use_container_width=True)
+
+                st.markdown("**Simulated Consumption**")
+                fig_cons = plot_simulated_path(
+                    time_idx,
+                    {'Consumption': sim['c']},
+                    title="Simulated Consumption"
+                )
+                st.plotly_chart(fig_cons, use_container_width=True)
+
+                st.markdown("**Simulated Capital Accumulation**")
+                fig_cap = plot_simulated_path(
+                    time_idx,
+                    {'Capital': sim['k'][:-1]},
+                    title="Simulated Capital Accumulation"
+                )
+                st.plotly_chart(fig_cap, use_container_width=True)
+
                 fig = plot_multiple_series(
                     time_idx,
                     {'Output': sim['output'], 'Consumption': sim['c'],
@@ -1001,18 +1321,30 @@ elif model_choice == "Robinson Crusoe":
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Statistics
-                st.markdown("**Simulation Statistics:**")
+                st.markdown("**Required Moments and Correlations:**")
                 col1, col2, col3, col4 = st.columns(4)
                 with col1:
-                    st.metric("Avg Output", f"{np.mean(sim['output']):.3f}")
+                    st.metric("Mean Output", f"{np.mean(sim['output']):.3f}")
                 with col2:
-                    st.metric("Avg Consumption", f"{np.mean(sim['c']):.3f}")
+                    st.metric("Mean Consumption", f"{np.mean(sim['c']):.3f}")
                 with col3:
-                    st.metric("Avg Capital", f"{np.mean(sim['k']):.3f}")
+                    st.metric("Mean Capital", f"{np.mean(sim['k'][:-1]):.3f}")
                 with col4:
-                    investment_rate = np.mean(sim['investment']) / np.mean(sim['output'])
-                    st.metric("I/Y Ratio", f"{investment_rate:.1%}")
+                    st.metric("Std Output", f"{np.std(sim['output']):.3f}")
+
+                col1, col2, col3, col4 = st.columns(4)
+                with col1:
+                    st.metric("Autocorr y(1)", f"{compute_moments(sim['output'])['autocorr_lag1']:.3f}")
+                with col2:
+                    st.metric("Autocorr c(1)", f"{compute_moments(sim['c'])['autocorr_lag1']:.3f}")
+                with col3:
+                    st.metric("Autocorr k(1)", f"{compute_moments(sim['k'][:-1])['autocorr_lag1']:.3f}")
+                with col4:
+                    corr = compute_correlations(sim['c'], sim['output'], "Consumption", "Output")
+                    st.metric("Corr(c, y)", f"{corr['correlation']:.3f}")
+
+                corr_k = compute_correlations(sim['k'][:-1], sim['output'], "Capital", "Output")
+                st.metric("Corr(k, y)", f"{corr_k['correlation']:.3f}")
                 
                 # Quick analysis section
                 st.markdown("---")
@@ -1053,7 +1385,7 @@ elif model_choice == "Robinson Crusoe":
                 st.info("Run a simulation first to see distributions")
         
         with tab5:
-            st.subheader("� Summary Statistics & Moments")
+            st.subheader("Summary Statistics & Moments")
             
             if 'rc_sim' in st.session_state:
                 sim = st.session_state.rc_sim
@@ -1093,28 +1425,28 @@ elif model_choice == "Robinson Crusoe":
                 st.info("Run a simulation first to see moments")
         
         with tab6:
-            st.subheader("Forecasts (AR(1) Model)")
+            st.subheader("Forecast Panel (AR(1) Model)")
             
             if 'rc_sim' in st.session_state:
                 sim = st.session_state.rc_sim
                 
                 # Forecast output
-                st.write("**Output Forecast (12 periods ahead)**")
-                o_forecast, o_std = forecast_ar1(sim['output'], periods_ahead=12)
+                st.write(f"**Output Forecast ({forecast_horizon} periods ahead)**")
+                o_forecast, o_std = forecast_ar1(sim['output'], periods_ahead=int(forecast_horizon))
                 fig_o = plot_forecast(sim['output'][-100:], o_forecast, o_std, 
                                      title="Output Forecast", series_name="Output")
                 st.plotly_chart(fig_o, use_container_width=True)
                 
                 # Forecast capital
-                st.write("**Capital Forecast (12 periods ahead)**")
-                k_forecast, k_std = forecast_ar1(sim['k'][:-1], periods_ahead=12)
+                st.write(f"**Capital Forecast ({forecast_horizon} periods ahead)**")
+                k_forecast, k_std = forecast_ar1(sim['k'][:-1], periods_ahead=int(forecast_horizon))
                 fig_k = plot_forecast(sim['k'][:-1][-100:], k_forecast, k_std,
                                      title="Capital Forecast", series_name="Capital")
                 st.plotly_chart(fig_k, use_container_width=True)
                 
                 # Forecast investment
-                st.write("**Investment Forecast (12 periods ahead)**")
-                i_forecast, i_std = forecast_ar1(sim['investment'], periods_ahead=12)
+                st.write(f"**Investment Forecast ({forecast_horizon} periods ahead)**")
+                i_forecast, i_std = forecast_ar1(sim['investment'], periods_ahead=int(forecast_horizon))
                 fig_i = plot_forecast(sim['investment'][-100:], i_forecast, i_std,
                                      title="Investment Forecast", series_name="Investment")
                 st.plotly_chart(fig_i, use_container_width=True)
@@ -1122,7 +1454,7 @@ elif model_choice == "Robinson Crusoe":
                 st.info("Run a simulation first to see forecasts")
         
         with tab7:
-            st.subheader("�📥 Download Results")
+            st.subheader("Download Results")
             
             col1, col2, col3 = st.columns(3)
             
@@ -1158,7 +1490,7 @@ elif model_choice == "Robinson Crusoe":
                     json_summary = create_model_summary_json(model, result)
                 
                 st.download_button(
-                    label="📋 Download Summary (JSON)",
+                    label="Download Summary (JSON)",
                     data=json_summary,
                     file_name="rc_summary.json",
                     mime="application/json",
@@ -1168,7 +1500,7 @@ elif model_choice == "Robinson Crusoe":
 # ============================================================================
 # MODEL 3: LABOR SUPPLY
 # ============================================================================
-elif model_choice == "Labor Supply":
+elif model_choice == "Model 3: Endogenous Labor Supply":
     st.header("Endogenous Labor Supply Model")
     
     col1, col2 = st.columns(2)
@@ -1188,138 +1520,91 @@ elif model_choice == "Labor Supply":
         """)
     
     # Sidebar parameters
-    st.sidebar.subheader("Model Parameters")
-    
-    # Load default or sample calibrations
-    calibration = get_sample_calibration(param_source)['ls']
-    
-    # FRED Data integration
-    if param_source == "Custom FRED Data":
-        fred_fetcher = st.session_state.fred_data_fetcher
-        st.sidebar.markdown("**Select FRED Series for Parameters:**")
-        
-        # Wage series for volatility and persistence
-        wage_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                  if FRED_SERIES[name]['use'] == 'Wages']
-        selected_wage_series = st.sidebar.selectbox(
-            "Wage Volatility (σ_w):", wage_series, key="ls_fred_sigma_w"
+    st.sidebar.subheader("Step 2: Adjust Economic Parameters")
+
+    calibration = DEFAULT_CALIBRATION['ls']
+
+    with st.sidebar.expander("Section 2: Preferences", expanded=False):
+        beta = st.slider("Discount factor (beta)", 0.90, 0.99, calibration.get('beta', 0.95), 0.01, key="ls_beta")
+        sigma = st.slider("Risk aversion on consumption (sigma)", 1.0, 10.0, calibration.get('gamma', 2.0), 0.5, key="ls_sigma")
+        phi = st.slider("Leisure weight / labor disutility parameter (phi)", 0.2, 6.0, calibration.get('chi', 1.5), 0.1, key="ls_phi")
+        eta = st.slider("Frisch-style leisure curvature (optional)", 0.4, 2.5, calibration.get('eta', 0.8), 0.1, key="ls_eta")
+
+    with st.sidebar.expander("Section 3: Technology or Budget", expanded=False):
+        r = st.slider("Interest rate (r)", 0.00, 0.10, calibration.get('r', 0.05), 0.005, key="ls_r")
+        n_a = st.slider("Asset grid resolution", 40, 180, 80, 10, key="ls_n_a")
+
+    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+        w_low = st.slider("Low wage", 0.2, 2.0, 0.8, 0.05, key="ls_w_low")
+        w_high = st.slider("High wage", 0.3, 3.0, 1.2, 0.05, key="ls_w_high")
+        if w_high <= w_low:
+            st.sidebar.warning("High wage should exceed low wage. Adjusting automatically.")
+            w_high = w_low + 0.05
+
+        p_stay_low = st.slider("Probability of staying in low wage", 0.01, 0.99, 0.90, 0.01, key="ls_p_stay_low")
+        p_stay_high = st.slider("Probability of staying in high wage", 0.01, 0.99, 0.90, 0.01, key="ls_p_stay_high")
+
+        wage_transition = np.array([
+            [p_stay_low, 1.0 - p_stay_low],
+            [1.0 - p_stay_high, p_stay_high],
+        ])
+        st.sidebar.caption("Wage transition matrix")
+        st.sidebar.dataframe(
+            pd.DataFrame(
+                wage_transition,
+                index=["Low", "High"],
+                columns=["Low", "High"],
+            ),
+            use_container_width=True,
         )
-        
-        # Labor market data for disutility and elasticity
-        labor_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                   if FRED_SERIES[name]['use'] == 'Labor']
-        selected_labor_series = st.sidebar.selectbox(
-            "Labor Market (χ, η):", labor_series, key="ls_fred_labor"
-        )
-        
-        # Interest rate for savings
-        interest_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                      if FRED_SERIES[name]['use'] == 'Interest Rate']
-        selected_r_series = st.sidebar.selectbox(
-            "Interest Rate (r):", interest_series, key="ls_fred_r"
-        )
-        
-        # Persistence from wage/income data
-        persistence_series = ["None"] + [name for name in FRED_SERIES.keys() 
-                                         if FRED_SERIES[name]['use'] in ['Wages', 'Income', 'Labor']]
-        selected_rho_series = st.sidebar.selectbox(
-            "Wage Persistence (ρ):", persistence_series, key="ls_fred_rho"
-        )
-        
-        # Apply calibrations
-        if selected_wage_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_wage_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_wage_series]['series_id']
-                    )
-                    calibration['sigma_w'] = max(0.01, min(0.3, params['std']))
-                    st.sidebar.success(f"σ_w = {calibration['sigma_w']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_wage_series}: {str(e)[:40]}")
-        
-        if selected_labor_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_labor_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_labor_series]['series_id']
-                    )
-                    calibration['chi'] = max(0.5, min(3.0, params['level_mean'] / 20))
-                    calibration['eta'] = max(0.3, min(1.5, 1.0 / (1.0 + params['std'])))
-                    st.sidebar.success(f"χ = {calibration['chi']:.2f}, η = {calibration['eta']:.2f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_labor_series}: {str(e)[:40]}")
-        
-        if selected_r_series != "None":
-            try:
-                with st.spinner(f"Fetching {selected_r_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_r_series]['series_id']
-                    )
-                    calibration['r'] = max(0.01, min(0.10, params['level_mean'] / 100))
-                    st.sidebar.success(f"r = {calibration['r']:.4f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_r_series}: {str(e)[:40]}")
-        
-        if selected_rho_series != "None":
-            try:
-                with st.spinner(f"📊 Fetching {selected_rho_series}..."):
-                    params = fred_fetcher.estimate_parameters(
-                        FRED_SERIES[selected_rho_series]['series_id']
-                    )
-                    calibration['rho'] = max(0.0, min(0.99, params['rho']))
-                    st.sidebar.success(f"ρ = {calibration['rho']:.3f}")
-            except Exception as e:
-                st.sidebar.warning(f"Could not fetch {selected_rho_series}: {str(e)[:40]}")
-        
-        # Show current calibration
-        st.sidebar.markdown("**Current Calibration:**")
-        st.sidebar.write(f"ρ = {calibration['rho']:.3f}")
-        st.sidebar.write(f"σ_w = {calibration['sigma_w']:.3f}")
-        st.sidebar.write(f"χ = {calibration['chi']:.3f}")
-        st.sidebar.write(f"η = {calibration['eta']:.3f}")
+
+    with st.sidebar.expander("Section 5: Simulation", expanded=False):
+        sim_length = st.slider("Number of periods", 100, 300, 100, 10, key="ls_sim_len")
+        initial_a = st.slider("Initial assets", 0.01, 20.0, 1.0, 0.1, key="ls_init_a")
+        initial_wage_state = st.selectbox("Initial wage state", ["Low", "High"], key="ls_init_wage_state")
+        random_seed = st.number_input("Random seed", min_value=0, max_value=100000, value=42, step=1, key="ls_seed")
+        forecast_horizon = st.slider("Forecast horizon", 5, 30, 10, 1, key="ls_forecast_horizon")
+
+    # Compatibility parameters when custom wage process is provided
+    rho = 0.0
+    sigma_w = 0.1
     
-    st.sidebar.markdown("<strong style='color:#00d4ff'>Model Parameters (Use sliders to adjust)</strong>", unsafe_allow_html=True)
-    col1, col2 = st.sidebar.columns(2)
-    with col1:
-        beta = st.slider("Discount Factor (β)", 0.90, 0.99, calibration.get('beta', 0.95), 0.01, key="ls_beta",
-                        help="How much worker values future consumption")
-        r = st.slider("Interest Rate (r)", 0.00, 0.10, calibration.get('r', 0.05), 0.01, key="ls_r",
-                     help="Return on savings")
-        gamma = st.slider("Consumption RRA (γ)", 1.0, 10.0, calibration.get('gamma', 2.0), 0.5, key="ls_gamma",
-                         help="Curvature of consumption utility")
-        chi = st.slider("Labor Disutility (χ)", 0.5, 5.0, calibration.get('chi', 1.0), 0.5,
-                       help="Intensity of preference against work")
-    with col2:
-        eta_default = calibration.get('eta', 0.5)
-        eta = st.slider("Labor Elasticity (η)", 0.5, 2.0, eta_default, 0.2,
-                        help="Responsiveness of labor supply to wage changes")
-        rho = st.slider("Wage Persistence (ρ)", 0.0, 0.99, calibration.get('rho', 0.9), 0.05, key="ls_rho",
-                        help="How much wage shocks persist")
-        sigma_w = st.slider("Wage Shock Std (σ_w)", 0.01, 0.3, calibration.get('sigma_w', 0.1), 0.05,
-                           help="Volatility of wage shocks")
-        n_a = st.slider("Asset Grid Resolution", 40, 150, 60, 10, key="ls_n_a",
-                       help="Number of discrete asset points")
-    # Markov transition matrix visualization for wage shocks
-    with st.sidebar.expander("📊 Markov Transition Matrix (Wage States)", expanded=False):
-        st.markdown("**Wage Transition Probabilities**")
-        st.caption("Shows probability of moving between wage states each period")
-        st.write(f"Persistence (main diagonal): {calibration.get('rho', 0.9):.2%}")
-        st.write(f"Wage shocks follow AR(1) with correlation {calibration.get('rho', 0.9):.3f}")
-    
-    st.sidebar.markdown("---")
-    
+    solve_clicked = False
+    simulate_clicked = False
+    reset_clicked = False
+    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
+        solve_clicked = st.button("Solve model", key="ls_solve", use_container_width=True)
+        simulate_clicked = st.button("Simulate path", key="ls_simulate_sidebar", use_container_width=True)
+        reset_clicked = st.button("Reset to defaults", key="ls_reset_defaults", use_container_width=True)
+
+    if reset_clicked:
+        for key, value in MODEL_SIDEBAR_DEFAULTS['ls'].items():
+            st.session_state[key] = value
+        st.session_state.pop('ls_model', None)
+        st.session_state.pop('ls_result', None)
+        st.session_state.pop('ls_sim', None)
+        st.rerun()
+
     # Solve model
-    if st.sidebar.button("Solve Model", key="ls_solve", use_container_width=True):
+    if solve_clicked:
         with st.spinner("Solving Labor Supply model with VFI..."):
             try:
                 model = LaborSupplyModel(
-                    beta=beta, r=r, gamma=gamma, chi=chi, eta=eta,
-                    rho=rho, sigma_w=sigma_w, n_a=n_a
+                    beta=beta,
+                    r=r,
+                    gamma=sigma,
+                    chi=phi,
+                    eta=eta,
+                    rho=rho,
+                    sigma_w=sigma_w,
+                    n_a=n_a,
+                    w_grid=np.array([w_low, w_high]),
+                    P_w=wage_transition,
                 )
                 result = model.solve(verbose=False)
                 st.session_state.ls_model = model
                 st.session_state.ls_result = result
+                st.session_state.pop('ls_sim', None)
                 if result.get('converged'):
                     st.success("Labor Supply model solved (converged)")
                 else:
@@ -1328,6 +1613,20 @@ elif model_choice == "Labor Supply":
                 st.error(f"Error solving model: {e}")
                 import traceback
                 st.text(traceback.format_exc())
+
+    if simulate_clicked:
+        if 'ls_model' not in st.session_state:
+            st.warning("Solve the model first before simulating.")
+        else:
+            with st.spinner("Simulating path..."):
+                init_w_idx = 0 if initial_wage_state == "Low" else 1
+                st.session_state.ls_sim = st.session_state.ls_model.simulate(
+                    T=sim_length,
+                    initial_a=initial_a,
+                    random_seed=int(random_seed),
+                    initial_w_state=init_w_idx,
+                )
+            st.success("Simulation complete.")
     
     # Display results
     if 'ls_model' in st.session_state:
@@ -1366,12 +1665,177 @@ elif model_choice == "Labor Supply":
             </div>
             """, unsafe_allow_html=True)
         
+        st.subheader("Step 5: Model Output")
+
+        st.markdown("### 1. Model Description")
+        st.markdown(
+            "State variables: assets and wage state. "
+            "Choice variables: consumption, labor, and next-period assets. "
+            "Shock type: two-state Markov wage shock. "
+            "Bellman intuition: the household chooses labor-leisure and savings to balance "
+            "current utility with continuation value under uncertain wages."
+        )
+
+        st.markdown("### 2. Policy Functions")
+        shock_labels = ["Low Wage State", "High Wage State"] if model.n_w == 2 else None
+        col1, col2, col3 = st.columns(3)
+        with col1:
+            fig = get_cached_plot(
+                'ls_policy_c_ordered',
+                plot_policy_function,
+                model.a_grid, model.policy_c,
+                title="Consumption Policy c(a, w)",
+                state_label="Assets (a)",
+                action_label="Consumption (c)",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with col2:
+            fig = get_cached_plot(
+                'ls_policy_l_ordered',
+                plot_policy_function,
+                model.a_grid, model.policy_l,
+                title="Labor Policy l(a, w)",
+                state_label="Assets (a)",
+                action_label="Labor (l)",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        with col3:
+            fig = get_cached_plot(
+                'ls_policy_a_ordered',
+                plot_policy_function,
+                model.a_grid, model.policy_a,
+                title="Savings Policy a'(a, w)",
+                state_label="Assets (a)",
+                action_label="Next Assets (a')",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig, use_container_width=True)
+
+        fig_leisure = get_cached_plot(
+            'ls_policy_leisure_ordered',
+            plot_policy_function,
+            model.a_grid,
+            1.0 - model.policy_l,
+            title="Leisure Implied from Labor: 1 - l(a, w)",
+            state_label="Assets (a)",
+            action_label="Leisure",
+            shock_labels=shock_labels,
+            max_legend_items=3,
+        )
+        st.plotly_chart(fig_leisure, use_container_width=True)
+
+        st.markdown("### 3. Simulation Plots")
+        if 'ls_sim' in st.session_state:
+            sim = st.session_state.ls_sim
+            t_idx = np.arange(len(sim['c']))
+            fig = plot_multiple_series(
+                t_idx,
+                {
+                    'Consumption': sim['c'],
+                    'Labor': sim['l'],
+                    'Wage': sim['w'],
+                    'Income': sim['y'],
+                },
+                title="Simulated Paths"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation from sidebar Section 6 to view simulation plots.")
+
+        st.markdown("### 4. Moments Table")
+        if 'ls_sim' in st.session_state:
+            sim = st.session_state.ls_sim
+            rows = []
+            for name, series in [
+                ("Consumption", sim['c']),
+                ("Labor", sim['l']),
+                ("Wage", sim['w']),
+                ("Income", sim['y']),
+            ]:
+                moms = compute_moments(series)
+                corr_val = 1.0 if name == "Income" else compute_correlations(series, sim['y'], name, "Income")['correlation']
+                rows.append({
+                    'Series': name,
+                    'Mean': round(moms['mean'], 4),
+                    'Variance': round(moms['variance'], 4),
+                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
+                    'Corr with Income': round(corr_val, 4),
+                })
+            st.table(pd.DataFrame(rows))
+        else:
+            st.info("Run simulation to compute moments table.")
+
+        st.markdown("### 5. Forecast Panel")
+        if 'ls_sim' in st.session_state:
+            sim = st.session_state.ls_sim
+            forecast_len = 10
+            plan_text = st.text_input(
+                "Enter next shocks (comma-separated Low/High)",
+                value="Low,High,High,Low",
+                key="ls_forecast_shock_plan",
+            )
+            shock_idx = parse_two_state_shock_plan(plan_text, forecast_len)
+            a_now = float(sim['a'][-1])
+            c_fore, l_fore, w_fore, y_fore = [], [], [], []
+
+            for idx in shock_idx:
+                w_t = float(model.w_grid[idx])
+                c_t = float(np.interp(a_now, model.a_grid, model.policy_c[:, idx]))
+                l_t = float(np.interp(a_now, model.a_grid, model.policy_l[:, idx]))
+                a_next = float(np.interp(a_now, model.a_grid, model.policy_a[:, idx]))
+                c_t = max(c_t, 1e-6)
+                l_t = float(np.clip(l_t, 0.0, 1.0))
+                y_t = w_t * l_t
+                c_fore.append(c_t)
+                l_fore.append(l_t)
+                w_fore.append(w_t)
+                y_fore.append(y_t)
+                a_now = a_next
+
+            fig = plot_multiple_series(
+                np.arange(forecast_len),
+                {
+                    'Consumption Forecast': c_fore,
+                    'Labor Forecast': l_fore,
+                    'Wage Path': w_fore,
+                    'Income Forecast': y_fore,
+                },
+                title="10-Period Conditional Forecast"
+            )
+            st.plotly_chart(fig, use_container_width=True)
+        else:
+            st.info("Run simulation first; forecast starts from latest simulated state.")
+
+        st.markdown("### 6. Economic Summary Text")
+        if 'ls_sim' in st.session_state:
+            sim = st.session_state.ls_sim
+            c_mean = np.mean(sim['c'])
+            l_mean = np.mean(sim['l'])
+            w_mean = np.mean(sim['w'])
+            lw = compute_correlations(sim['l'], sim['w'], "Labor", "Wage")['correlation']
+            cy = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")['correlation']
+            st.markdown(
+                f"Average consumption is **{c_mean:.3f}**, average labor is **{l_mean:.3f}**, and average wage is **{w_mean:.3f}**. "
+                f"Labor-wage correlation is **{lw:.3f}** and consumption-income correlation is **{cy:.3f}**, "
+                f"suggesting {'elastic' if abs(lw) > 0.4 else 'muted'} labor response under the selected shock persistence."
+            )
+        else:
+            st.info("Run simulation to generate dynamic economic summary text.")
+
+        st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
+
         # Tabs
         tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                                                "Simulation", "Analysis", "Moments", "Forecasts", "Download"])
+                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
         
         with tab1:
             st.subheader("Policy Functions")
+            shock_labels = ["Low Wage State", "High Wage State"] if model.n_w == 2 else None
             col1, col2, col3 = st.columns(3)
             with col1:
                 fig = get_cached_plot(
@@ -1381,7 +1845,7 @@ elif model_choice == "Labor Supply":
                     title="Optimal Savings Policy: a'(a)",
                     state_label="Current Assets (a)",
                     action_label="Next Period Assets (a')",
-                    shock_labels=["Low Wage State", "Medium Wage State", "High Wage State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -1394,7 +1858,7 @@ elif model_choice == "Labor Supply":
                     title="Optimal Labor Supply Policy: l(a)",
                     state_label="Current Assets (a)",
                     action_label="Labor Supply (l)",
-                    shock_labels=["Low Wage State", "Medium Wage State", "High Wage State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
@@ -1407,10 +1871,24 @@ elif model_choice == "Labor Supply":
                     title="Optimal Consumption Policy: c(a)",
                     state_label="Current Assets (a)",
                     action_label="Consumption (c)",
-                    shock_labels=["Low Wage State", "Medium Wage State", "High Wage State"],
+                    shock_labels=shock_labels,
                     max_legend_items=3
                 )
                 st.plotly_chart(fig, use_container_width=True)
+
+            st.markdown("**Leisure Implied from Labor Policy**")
+            fig_leisure = get_cached_plot(
+                'ls_policy_leisure',
+                plot_policy_function,
+                model.a_grid,
+                1.0 - model.policy_l,
+                title="Implied Leisure Policy: 1 - l(a)",
+                state_label="Current Assets (a)",
+                action_label="Leisure",
+                shock_labels=shock_labels,
+                max_legend_items=3,
+            )
+            st.plotly_chart(fig_leisure, use_container_width=True)
         
         with tab2:
             st.subheader("Value Function Heatmap")
@@ -1425,26 +1903,41 @@ elif model_choice == "Labor Supply":
             st.plotly_chart(fig, use_container_width=True)
         
         with tab3:
-            st.subheader("Simulate Economy")
-            col1, col2, col3 = st.columns(3)
-            with col1:
-                sim_length = st.slider("Simulation Length", 100, 5000, 500, 100, key="ls_sim_len")
-            with col2:
-                initial_a = st.slider("Initial Asset Level", 0.1, 10.0, 1.0, 0.1, key="ls_init_a")
-            with col3:
-                random_seed = st.slider("Random Seed", 0, 10000, 42, 1, key="ls_seed")
-            
-            if st.button("Run Simulation", key="ls_run_sim", use_container_width=True):
-                with st.spinner("Running simulation..."):
-                    sim = model.simulate(T=sim_length, initial_a=initial_a,
-                                       random_seed=int(random_seed))
-                    st.session_state.ls_sim = sim
+            st.subheader("Step 4: Simulate")
+            init_w_idx = 0 if initial_wage_state == "Low" else 1
+            st.caption(
+                f"Setup: T={sim_length}, initial assets={initial_a:.2f}, "
+                f"initial wage state={initial_wage_state}, seed={int(random_seed)}"
+            )
             
             if 'ls_sim' in st.session_state:
                 sim = st.session_state.ls_sim
                 time_idx = np.arange(len(sim['c']))
                 
-                # Time series
+                st.markdown("**Simulated Wage Path**")
+                fig_w = plot_simulated_path(
+                    time_idx,
+                    {'Wage': sim['w']},
+                    title="Simulated Wage Path"
+                )
+                st.plotly_chart(fig_w, use_container_width=True)
+
+                st.markdown("**Simulated Consumption Path**")
+                fig_c = plot_simulated_path(
+                    time_idx,
+                    {'Consumption': sim['c']},
+                    title="Simulated Consumption Path"
+                )
+                st.plotly_chart(fig_c, use_container_width=True)
+
+                st.markdown("**Simulated Labor Path**")
+                fig_l = plot_simulated_path(
+                    time_idx,
+                    {'Labor Supply': sim['l']},
+                    title="Simulated Labor Path"
+                )
+                st.plotly_chart(fig_l, use_container_width=True)
+
                 fig = plot_multiple_series(
                     time_idx,
                     {'Consumption': sim['c'], 'Labor Supply': sim['l'],
@@ -1453,24 +1946,40 @@ elif model_choice == "Labor Supply":
                 )
                 st.plotly_chart(fig, use_container_width=True)
                 
-                # Statistics
-                st.markdown("**Simulation Statistics:**")
-                col1, col2, col3, col4 = st.columns(4)
+                st.markdown("**Mean / Variance / Autocorrelation**")
+                col1, col2, col3 = st.columns(3)
                 with col1:
-                    st.metric("Avg Consumption", f"{np.mean(sim['c']):.3f}")
+                    st.metric("Mean Consumption", f"{np.mean(sim['c']):.3f}")
+                    st.metric("Var Consumption", f"{np.var(sim['c']):.3f}")
+                    st.metric("Autocorr c(1)", f"{compute_moments(sim['c'])['autocorr_lag1']:.3f}")
                 with col2:
-                    st.metric("Avg Labor", f"{np.mean(sim['l']):.3f}")
+                    st.metric("Mean Labor", f"{np.mean(sim['l']):.3f}")
+                    st.metric("Var Labor", f"{np.var(sim['l']):.3f}")
+                    st.metric("Autocorr l(1)", f"{compute_moments(sim['l'])['autocorr_lag1']:.3f}")
                 with col3:
-                    st.metric("Labor Volatility", f"{np.std(sim['l']):.3f}")
-                with col4:
-                    st.metric("Avg Wage", f"{np.mean(sim['w'][:-1]):.3f}")
+                    st.metric("Mean Wage", f"{np.mean(sim['w']):.3f}")
+                    st.metric("Var Wage", f"{np.var(sim['w']):.3f}")
+                    st.metric("Autocorr w(1)", f"{compute_moments(sim['w'])['autocorr_lag1']:.3f}")
+
+                st.markdown("**Correlation with Wage / Income**")
+                col1, col2 = st.columns(2)
+                with col1:
+                    corr_cw = compute_correlations(sim['c'], sim['w'], "Consumption", "Wage")
+                    corr_lw = compute_correlations(sim['l'], sim['w'], "Labor", "Wage")
+                    st.metric("Corr(c, w)", f"{corr_cw['correlation']:.3f}")
+                    st.metric("Corr(l, w)", f"{corr_lw['correlation']:.3f}")
+                with col2:
+                    corr_cy = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")
+                    corr_ly = compute_correlations(sim['l'], sim['y'], "Labor", "Income")
+                    st.metric("Corr(c, y)", f"{corr_cy['correlation']:.3f}")
+                    st.metric("Corr(l, y)", f"{corr_ly['correlation']:.3f}")
                 
                 # Quick analysis section
                 st.markdown("---")
                 st.markdown("**Quick Analysis (see 'Analysis' tab for detailed distributions):**")
                 col1, col2 = st.columns(2)
                 with col1:
-                    st.write("📊 **Labor Supply & Income Analysis:**")
+                    st.write("**Labor Supply & Income Analysis:**")
                     l_med = np.median(sim['l'])
                     l_low = np.min(sim['l'])
                     l_high = np.max(sim['l'])
@@ -1478,7 +1987,7 @@ elif model_choice == "Labor Supply":
                     w_std = np.std(sim['w'][:-1])
                     st.write(f"Workers supply roughly {l_med:.3f} units of labor on average (e.g. hours per period). The lightest workload is {l_low:.3f} and the heaviest is {l_high:.3f}. Received wages average {w_med:.3f} currency‑units, with typical variation of {w_std:.3f}.")
                 with col2:
-                    st.write("💰 **Consumption & Savings Analysis:**")
+                    st.write("**Consumption & Savings Analysis:**")
                     c_med = np.median(sim['c'])
                     c_std = np.std(sim['c'])
                     a_gini = gini_coefficient(sim['a'])
@@ -1505,7 +2014,7 @@ elif model_choice == "Labor Supply":
                 st.info("Run a simulation first to see distributions")
         
         with tab5:
-            st.subheader("� Summary Statistics & Moments")
+            st.subheader("Summary Statistics & Moments")
             
             if 'ls_sim' in st.session_state:
                 sim = st.session_state.ls_sim
@@ -1543,28 +2052,28 @@ elif model_choice == "Labor Supply":
                 st.info("Run a simulation first to see moments")
         
         with tab6:
-            st.subheader("Forecasts (AR(1) Model)")
+            st.subheader("Forecast Panel (AR(1) Model)")
             
             if 'ls_sim' in st.session_state:
                 sim = st.session_state.ls_sim
                 
                 # Forecast labor  supply
-                st.write("**Labor Supply Forecast (12 periods ahead)**")
-                l_forecast, l_std = forecast_ar1(sim['l'], periods_ahead=12)
+                st.write(f"**Labor Supply Forecast ({forecast_horizon} periods ahead)**")
+                l_forecast, l_std = forecast_ar1(sim['l'], periods_ahead=int(forecast_horizon))
                 fig_l = plot_forecast(sim['l'][-100:], l_forecast, l_std, 
                                      title="Labor Supply Forecast", series_name="Labor Supply")
                 st.plotly_chart(fig_l, use_container_width=True)
                 
                 # Forecast assets
-                st.write("**Asset Forecast (12 periods ahead)**")
-                a_forecast, a_std = forecast_ar1(sim['a'][:-1], periods_ahead=12)
+                st.write(f"**Asset Forecast ({forecast_horizon} periods ahead)**")
+                a_forecast, a_std = forecast_ar1(sim['a'][:-1], periods_ahead=int(forecast_horizon))
                 fig_a = plot_forecast(sim['a'][:-1][-100:], a_forecast, a_std,
                                      title="Asset Forecast", series_name="Assets")
                 st.plotly_chart(fig_a, use_container_width=True)
                 
                 # Forecast consumption
-                st.write("**Consumption Forecast (12 periods ahead)**")
-                c_forecast, c_std = forecast_ar1(sim['c'], periods_ahead=12)
+                st.write(f"**Consumption Forecast ({forecast_horizon} periods ahead)**")
+                c_forecast, c_std = forecast_ar1(sim['c'], periods_ahead=int(forecast_horizon))
                 fig_c = plot_forecast(sim['c'][-100:], c_forecast, c_std,
                                      title="Consumption Forecast", series_name="Consumption")
                 st.plotly_chart(fig_c, use_container_width=True)
@@ -1572,7 +2081,7 @@ elif model_choice == "Labor Supply":
                 st.info("Run a simulation first to see forecasts")
         
         with tab7:
-            st.subheader("�📥 Download Results")
+            st.subheader("Download Results")
             
             col1, col2, col3 = st.columns(3)
             
@@ -1583,7 +2092,7 @@ elif model_choice == "Labor Supply":
                     'ls'
                 )
                 st.download_button(
-                    label="📊 Download Policies (CSV)",
+                    label="Download Policies (CSV)",
                     data=csv_policies,
                     file_name="ls_policies.csv",
                     mime="text/csv",
@@ -1608,7 +2117,7 @@ elif model_choice == "Labor Supply":
                     json_summary = create_model_summary_json(model, result)
                 
                 st.download_button(
-                    label="📋 Download Summary (JSON)",
+                    label="Download Summary (JSON)",
                     data=json_summary,
                     file_name="ls_summary.json",
                     mime="application/json",

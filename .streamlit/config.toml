@@ -15,7 +15,7 @@ level = "warning"
 # The address where the server will listen for client and browser connections.
 address = "0.0.0.0"
 # The port where the server will listen for client and browser connections.
-port = 8501
+port = 8502
 # Enables support for Cross-Origin Request Sharing (CORS) protection
 enableCORS = true
 # Enables support for Cross-Site Request Forgery (XSRF) protection
@@ -31,4 +31,4 @@ serverAddress = "localhost"
 # Whether to send usage statistics to Streamlit.
 gatherUsageStats = false
 # Port where users should point their browsers
-serverPort = 8501
+serverPort = 8502
