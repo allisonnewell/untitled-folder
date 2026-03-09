@@ -371,18 +371,18 @@ runtime_cwd = os.getcwd()
 st.caption(f"Running file: `{runtime_app_path}` | CWD: `{runtime_cwd}`")
 st.sidebar.caption(f"Running file: `{runtime_app_path}`")
 st.markdown("""
-Interactive dashboard for solving and simulating three canonical macroeconomic models 
-using **Value Function Iteration (VFI)**.  
-**Download results • Analyze policies • Run simulations**
+Interactive dashboard for exploring three economics models that show how people make decisions about 
+**money, work, and savings** when the future is uncertain.  
+**Adjust sliders • Watch graphs update • Download results**
 """)
 
 st.markdown("""
-### Workflow
-1. Select a model in the sidebar (`Model 1`, `Model 2`, or `Model 3`).
-2. Adjust economic parameters in the sidebar.
-3. Click **Solve Model** to run VFI and compute value and policy functions.
-4. Click **Simulate** to generate a 100-200 period path using solved policies.
-5. Review policy graphs, simulated time series, summary statistics, forecast panel, and interpretation.
+### How to Use This App
+1. **Pick a model** from the dropdown in the sidebar (left).
+2. **Adjust the sliders** to change things like income uncertainty or how patient people are.
+3. The app **automatically updates** when you move sliders—no buttons needed!
+4. Watch graphs and analysis appear showing how people would behave under your settings.
+5. Use the **"Reset to defaults"** button if you want to start over.
 """)
 
 st.sidebar.markdown("---")
@@ -410,17 +410,17 @@ if model_choice == "Model 1: Consumption-Savings":
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
-        **Problem:** An agent with uncertain income chooses consumption and savings to maximize 
-        lifetime utility subject to a borrowing constraint.
+        **The Problem:** Imagine someone with an unpredictable paycheck who needs to decide 
+        how much to spend today versus save for tomorrow, but they can't borrow money.
         """)
     
     with col2:
         st.markdown("""
         **Key Features:**
-        - Income uncertainty (AR(1) process)
-        - Precautionary savings motive
-        - No-borrowing constraint
-        - Implications for consumption inequality
+        - Income varies randomly (like gig work or seasonal jobs)
+        - Saving for "rainy days" (precautionary savings)
+        - Can't go into debt
+        - Shows why some people save more than others
         """)
     
     # Sidebar parameters
@@ -609,10 +609,10 @@ if model_choice == "Model 1: Consumption-Savings":
             <div class="interpretation-box">
             <strong>What the Model Shows:</strong>
             <ul>
-            <li><strong>Policy Functions:</strong> Show optimal savings and consumption at each asset level</li>
-            <li><strong>Precautionary Savings:</strong> Higher income uncertainty → more savings</li>
-            <li><strong>Consumption Insurance:</strong> Agents smooth consumption over time</li>
-            <li><strong>Constraint Binding:</strong> At low assets, borrowing limit is active</li>
+            <li><strong>Decision Rules:</strong> How much to save or spend based on your current wealth</li>
+            <li><strong>Safety Net Behavior:</strong> When income is more uncertain, people save more for emergencies</li>
+            <li><strong>Spending Smoothness:</strong> People try to keep spending steady even when income jumps around</li>
+            <li><strong>Can't Borrow:</strong> When you have little saved, you can't spend more than you earn</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -621,11 +621,10 @@ if model_choice == "Model 1: Consumption-Savings":
 
         st.markdown("### 1. Model Description")
         st.markdown(
-            "State variables: assets and income state. "
-            "Choice variables: consumption and next-period assets. "
-            "Shock type: two-state Markov income shock. "
-            "Bellman intuition: the household trades off current utility from consumption "
-            "against continuation value from carrying assets into future uncertain income states."
+            "**What you start with:** Current savings and whether income is high or low today. "
+            "**What you choose:** How much to spend now and how much to save for later. "
+            "**What's uncertain:** Income randomly switches between high and low states. "
+            "**The tradeoff:** Enjoy spending money today vs. having a cushion for uncertain future income."
         )
 
         st.markdown("### 2. Policy Functions")
@@ -703,15 +702,14 @@ if model_choice == "Model 1: Consumption-Savings":
             comovement_desc = "tightly procyclical" if cy_corr > 0.7 else "moderately procyclical" if cy_corr > 0.4 else "weakly procyclical" if cy_corr > 0 else "countercyclical"
             
             st.markdown(
-                f"The simulated consumption path exhibits **{smoothing_quality} consumption smoothing**, "
-                f"with a standard deviation ratio of **{volatility_ratio:.3f}** relative to income volatility. "
-                f"This indicates the agent is {'effectively buffering income shocks through savings/dissavings' if volatility_ratio < 0.6 else 'partially smoothing but still exposed to substantial income fluctuations'}. "
-                f"The consumption series is **{persistence_desc}** (autocorr = {c_moms['autocorr_lag1']:.3f}), "
-                f"suggesting {'durable consumption patterns that respond slowly to shocks' if c_moms['autocorr_lag1'] > 0.6 else 'more responsive adjustment to new information'}. "
-                f"The correlation with income is **{cy_corr:.3f}**, meaning consumption is **{comovement_desc}**—"
-                f"{'the agent tracks income closely despite attempting to smooth' if abs(cy_corr) > 0.5 else 'the agent successfully decouples consumption from short-run income variations'}. "
-                f"Average asset holdings of **{a_moms['mean']:.3f}** {'provide substantial buffer capacity' if a_moms['mean'] > 2.0 else 'indicate moderate precautionary savings' if a_moms['mean'] > 0.5 else 'suggest binding borrowing constraints'}, "
-                f"with asset-income correlation of **{ay_corr:.3f}** showing that assets {'accumulate during high-income periods' if ay_corr > 0.3 else 'remain relatively stable across the income cycle' if ay_corr > -0.3 else 'unexpectedly decline when income rises'}."
+                f"This person shows **{smoothing_quality} spending stability** (volatility score: **{volatility_ratio:.3f}**). "
+                f"{'They do a great job keeping spending steady by using savings when income drops and saving when income rises' if volatility_ratio < 0.6 else 'Their spending still bounces around quite a bit when income changes'}. "
+                f"Spending patterns are **{persistence_desc}** (stickiness: {c_moms['autocorr_lag1']:.3f}), meaning "
+                f"{'they maintain similar spending habits from month to month' if c_moms['autocorr_lag1'] > 0.6 else 'they quickly adjust spending when circumstances change'}. "
+                f"The link between spending and income is **{cy_corr:.3f}**—"
+                f"{'spending closely follows income ups and downs' if abs(cy_corr) > 0.5 else 'spending stays fairly steady regardless of income fluctuations'}. "
+                f"On average, they keep **{a_moms['mean']:.3f}** in savings, which {'gives them a strong financial cushion' if a_moms['mean'] > 2.0 else 'provides some protection but not a huge buffer' if a_moms['mean'] > 0.5 else 'leaves them living paycheck-to-paycheck'}. "
+                f"Savings trend (correlation: **{ay_corr:.3f}**): {'they build savings when income is good' if ay_corr > 0.3 else 'savings stay fairly constant regardless of income' if ay_corr > -0.3 else 'surprisingly, savings drop when income rises'}."
             )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
@@ -1067,17 +1065,17 @@ elif model_choice == "Model 2: Robinson Crusoe":
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
-        **Problem:** An agent produces output using capital, consumes, and invests, 
-        subject to technology shocks.
+        **The Problem:** Like Robinson Crusoe on an island, someone uses tools and equipment 
+        (capital) to produce goods, then decides whether to consume them or build better tools.
         """)
     
     with col2:
         st.markdown("""
         **Key Features:**
-        - Capital accumulation
-        - Productivity shocks (TFP)
-        - Investment-consumption tradeoff
-        - Business cycle dynamics
+        - Building up equipment over time
+        - Random good days and bad days (productivity shocks)
+        - Choosing between enjoying today vs. investing for tomorrow
+        - Shows how economies expand and contract
         """)
     
     # Sidebar parameters
@@ -1256,10 +1254,10 @@ elif model_choice == "Model 2: Robinson Crusoe":
             <div class="interpretation-box">
             <strong>What the Model Shows:</strong>
             <ul>
-            <li><strong>Capital Accumulation:</strong> Optimal investment decisions over time</li>
-            <li><strong>Productivity Effects:</strong> Higher TFP → more output and investment</li>
-            <li><strong>Consumption Smoothing:</strong> Agent absorbs TFP shocks with savings</li>
-            <li><strong>Business Cycles:</strong> Positive correlation between output, consumption, investment</li>
+            <li><strong>Building Equipment:</strong> How much to invest in better tools each period</li>
+            <li><strong>Good Days & Bad Days:</strong> When you're more productive, you make more stuff and can invest more</li>
+            <li><strong>Dealing with Ups and Downs:</strong> Using savings to maintain stable consumption despite productivity swings</li>
+            <li><strong>Economic Booms & Busts:</strong> Output, spending, and investment all tend to rise and fall together</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -1268,11 +1266,10 @@ elif model_choice == "Model 2: Robinson Crusoe":
 
         st.markdown("### 1. Model Description")
         st.markdown(
-            "State variables: capital and TFP state. "
-            "Choice variables: consumption and next-period capital. "
-            "Shock type: two-state Markov TFP shock. "
-            "Bellman intuition: the planner allocates output between consumption and investment to maximize "
-            "current utility plus discounted continuation value under future productivity uncertainty."
+            "**What you start with:** Current equipment level and whether today is a 'good productivity day' or 'bad productivity day'. "
+            "**What you choose:** How much output to consume now vs. invest in better equipment. "
+            "**What's uncertain:** Productivity randomly switches between good days and bad days. "
+            "**The tradeoff:** Enjoy consumption today vs. build better equipment for more production tomorrow."
         )
 
         st.markdown("### 2. Policy Functions")
@@ -1358,16 +1355,15 @@ elif model_choice == "Model 2: Robinson Crusoe":
             persistence_desc = "highly persistent shocks" if y_moms['autocorr_lag1'] > 0.7 else "moderately persistent shocks" if y_moms['autocorr_lag1'] > 0.4 else "transitory shocks"
             
             st.markdown(
-                f"The real business cycle simulation reveals **{cycle_strength} fluctuations** with output volatility of **{output_volatility:.4f}**. "
-                f"This economy exhibits **{business_cycle_pattern}**: consumption correlation with output is **{cy_corr:.3f}** and investment correlation is **{iy_corr:.3f}**. "
-                f"{'Both consumption and investment move procyclically, matching empirical business cycle regularities' if (cy_corr > 0.5 and iy_corr > 0.5) else 'The correlation patterns deviate from typical business cycle facts, possibly due to parameter choices'}. "
-                f"Investment is **{'more volatile than output' if i_volatility > output_volatility else 'less volatile than output'}** (ratio: {i_volatility/output_volatility:.2f}), "
-                f"{'consistent with the empirical finding that investment is the most volatile GDP component' if i_volatility > output_volatility else 'which is unusual for standard RBC models'}. "
-                f"Output autocorrelation of **{y_moms['autocorr_lag1']:.3f}** indicates **{persistence_desc}**, "
-                f"{'generating realistic business cycle persistence' if y_moms['autocorr_lag1'] > 0.6 else 'producing relatively transitory fluctuations'}. "
-                f"The average capital stock of **{k_moms['mean']:.3f}** {'exceeds steady-state predictions, indicating the shock process favors high-TFP states' if k_moms['mean'] > 5.0 else 'remains near steady-state levels'}. "
-                f"Capital-output correlation of **{ky_corr:.3f}** shows {'the expected positive relationship' if ky_corr > 0.3 else 'surprisingly weak co-movement, possibly due to offsetting effects'}, "
-                f"reflecting the {'capacity expansion during booms' if ky_corr > 0.3 else 'complex dynamic response to TFP shocks'}."
+                f"This economy shows **{cycle_strength} boom-bust swings** (output jumpiness: **{output_volatility:.4f}**). "
+                f"Spending-output link is **{cy_corr:.3f}** and investment-output link is **{iy_corr:.3f}**. "
+                f"{'Both spending and investment go up when output goes up and down when output drops—this matches real-world patterns' if (cy_corr > 0.5 and iy_corr > 0.5) else 'The patterns here differ from typical real economies, possibly due to the parameter settings'}. "
+                f"Investment swings are **{'bigger than output swings' if i_volatility > output_volatility else 'smaller than output swings'}** ({i_volatility/output_volatility:.2f}x), "
+                f"{'which matches reality where investment is the most volatile part of the economy' if i_volatility > output_volatility else 'which is unusual—normally investment swings wildly'}. "
+                f"Output stickiness (**{y_moms['autocorr_lag1']:.3f}**) shows **{persistence_desc}**, meaning "
+                f"{'good times and bad times tend to last for a while' if y_moms['autocorr_lag1'] > 0.6 else 'conditions change quickly from period to period'}. "
+                f"Average equipment level is **{k_moms['mean']:.3f}**, which {'is quite high, suggesting more good days than bad' if k_moms['mean'] > 5.0 else 'is fairly normal'}. "
+                f"Equipment-output relationship (**{ky_corr:.3f}**): {'as expected, more equipment means more output' if ky_corr > 0.3 else 'surprisingly weak connection' if ky_corr > -0.3 else 'unexpected negative relationship'}."
             )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
@@ -1718,17 +1714,17 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
     col1, col2 = st.columns(2)
     with col1:
         st.markdown("""
-        **Problem:** An agent chooses consumption and labor supply in response to 
-        wage fluctuations, balancing work and leisure.
+        **The Problem:** Someone decides how many hours to work and how much to spend 
+        as their hourly wage changes, balancing the desire for money vs. free time.
         """)
     
     with col2:
         st.markdown("""
         **Key Features:**
-        - Labor-leisure choice
-        - Wage uncertainty (AR(1))
-        - Income & substitution effects
-        - Labor supply elasticity
+        - Choosing between work and relaxation
+        - Wages that change unpredictably
+        - Two competing forces: "work more when paid more" vs. "I can afford to work less"
+        - How responsive work hours are to wage changes
         """)
     
     # Sidebar parameters
@@ -1902,10 +1898,10 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
             <div class="interpretation-box">
             <strong>What the Model Shows:</strong>
             <ul>
-            <li><strong>Income Effect:</strong> Higher wages → less labor (want more leisure)</li>
-            <li><strong>Substitution Effect:</strong> Higher wages → more labor (work is more valuable)</li>
-            <li><strong>Net Effect:</strong> Depends on Frisch elasticity η</li>
-            <li><strong>Asset Accumulation:</strong> Savings smooth income over lifetime</li>
+            <li><strong>Wealth Effect:</strong> When wages rise, you might work less because you're richer</li>
+            <li><strong>Opportunity Cost Effect:</strong> When wages rise, each hour of leisure is more "expensive," so you might work more</li>
+            <li><strong>Which Wins?:</strong> The balance between these two forces (controlled by the elasticity parameter)</li>
+            <li><strong>Savings Buffer:</strong> Building savings helps keep spending stable despite changing wages</li>
             </ul>
             </div>
             """, unsafe_allow_html=True)
@@ -1914,11 +1910,10 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
 
         st.markdown("### 1. Model Description")
         st.markdown(
-            "State variables: assets and wage state. "
-            "Choice variables: consumption, labor, and next-period assets. "
-            "Shock type: two-state Markov wage shock. "
-            "Bellman intuition: the household chooses labor-leisure and savings to balance "
-            "current utility with continuation value under uncertain wages."
+            "**What you start with:** Current savings and whether wages are high or low today. "
+            "**What you choose:** How much to spend, how many hours to work, and how much to save. "
+            "**What's uncertain:** Wages randomly switch between high and low. "
+            "**The tradeoff:** Enjoying consumption and free time today vs. building savings for an uncertain wage future."
         )
 
         st.markdown("### 2. Policy Functions")
@@ -2030,19 +2025,18 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
             labor_wage_ratio = labor_volatility / wage_volatility if wage_volatility > 0 else 0
             
             st.markdown(
-                f"The labor supply model generates **{labor_response} labor supply responses** to wage fluctuations, "
-                f"with labor-wage correlation of **{lw_corr:.3f}**. "
-                f"This indicates **{substitution_dominance}**: "
-                f"{'when wages rise, the agent works more hours, sacrificing leisure for higher income' if lw_corr > 0.3 else 'when wages rise, the agent reduces hours, consuming leisure from increased wealth' if lw_corr < -0.2 else 'income and substitution effects roughly cancel, producing limited hours adjustment'}. "
-                f"The average labor supply is **{l_moms['mean']:.3f}** (average leisure: **{avg_leisure:.3f}**), "
-                f"{'indicating substantial labor market participation' if l_moms['mean'] > 0.5 else 'suggesting preference for leisure dominates' if l_moms['mean'] < 0.3 else 'showing balanced work-leisure allocation'}. "
-                f"Labor volatility relative to wages is **{labor_wage_ratio:.3f}**, meaning the labor supply elasticity is "
-                f"{'highly elastic—hours respond strongly to wage changes' if labor_wage_ratio > 1.0 else 'moderately elastic' if labor_wage_ratio > 0.5 else 'relatively inelastic—hours remain fairly stable despite wage fluctuations'}. "
-                f"Consumption-wage correlation of **{cw_corr:.3f}** shows {'consumption tracks wages closely through the income channel' if cw_corr > 0.5 else 'consumption is partially insulated from wage shocks through inter-temporal smoothing'}. "
-                f"The consumption-income correlation of **{cy_corr:.3f}** reveals {'tight coupling' if cy_corr > 0.7 else 'moderate coupling' if cy_corr > 0.4 else 'weak coupling'}, "
-                f"suggesting the agent is {'constrained in smoothing or highly responsive to current income' if cy_corr > 0.6 else 'successfully smoothing consumption through savings decisions'}. "
-                f"Labor autocorrelation of **{l_moms['autocorr_lag1']:.3f}** indicates "
-                f"{'persistent labor supply patterns, possibly from wage persistence or habit formation' if l_moms['autocorr_lag1'] > 0.5 else 'flexible labor adjustment to current wage conditions'}."
+                f"Work hours show a **{labor_response} response** to wage changes (correlation: **{lw_corr:.3f}**). "
+                f"This reveals **{substitution_dominance}**: "
+                f"{'when wages go up, they work more hours, trading free time for extra money' if lw_corr > 0.3 else 'when wages go up, they work fewer hours, enjoying the wealth effect' if lw_corr < -0.2 else 'wealth and opportunity-cost effects roughly cancel out, so hours barely change with wages'}. "
+                f"On average, they work **{l_moms['mean']:.3f}** of their time (leaving **{avg_leisure:.3f}** for leisure), "
+                f"{'showing they are quite work-focused' if l_moms['mean'] > 0.5 else 'showing they prioritize free time' if l_moms['mean'] < 0.3 else 'showing balanced work-life choices'}. "
+                f"Hour flexibility score is **{labor_wage_ratio:.3f}**, meaning "
+                f"{'hours adjust a lot when wages change—very flexible' if labor_wage_ratio > 1.0 else 'hours adjust moderately to wage changes' if labor_wage_ratio > 0.5 else 'hours stay fairly constant regardless of wage changes—inflexible'}. "
+                f"Spending-wage link (**{cw_corr:.3f}**): {'spending moves closely with wages' if cw_corr > 0.5 else 'spending is somewhat protected from wage swings through savings'}. "
+                f"Spending-income link (**{cy_corr:.3f}**) is {'very tight' if cy_corr > 0.7 else 'moderate' if cy_corr > 0.4 else 'loose'}, "
+                f"suggesting they {'live paycheck-to-paycheck' if cy_corr > 0.6 else 'use savings to smooth spending when income jumps around'}. "
+                f"Work hour stickiness (**{l_moms['autocorr_lag1']:.3f}**): "
+                f"{'they stick to consistent work schedules over time' if l_moms['autocorr_lag1'] > 0.5 else 'they adjust hours frequently based on current conditions'}."
             )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
