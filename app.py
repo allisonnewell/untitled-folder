@@ -87,6 +87,50 @@ def parse_two_state_shock_plan(plan_text, horizon):
 
     return np.array(indices[:horizon], dtype=int)
 
+
+def render_static_downloads(fig, data_frame, name_prefix, key_prefix):
+    """Render CSV and PNG download buttons for static intuition outputs."""
+    col1, col2 = st.columns(2)
+    with col1:
+        st.download_button(
+            label="Download Static Data (CSV)",
+            data=data_frame.to_csv(index=False),
+            file_name=f"{name_prefix}_static_intuition.csv",
+            mime="text/csv",
+            key=f"{key_prefix}_csv",
+        )
+    with col2:
+        try:
+            image_bytes = fig.to_image(format="png")
+            st.download_button(
+                label="Download Static Plot (PNG)",
+                data=image_bytes,
+                file_name=f"{name_prefix}_static_intuition.png",
+                mime="image/png",
+                key=f"{key_prefix}_png",
+            )
+        except Exception:
+            st.caption("PNG export unavailable in this environment (CSV download still available).")
+
+
+def queue_model_reset(model_key):
+    """Queue a model reset; applied at top of model block before widgets are created."""
+    st.session_state.pending_model_reset = model_key
+
+
+def apply_pending_reset_if_needed(model_key):
+    """Apply pending reset before widgets are instantiated to avoid Streamlit key mutation errors."""
+    if st.session_state.get('pending_model_reset') != model_key:
+        return
+
+    for key, value in MODEL_SIDEBAR_DEFAULTS[model_key].items():
+        st.session_state[key] = value
+
+    for suffix in ('model', 'result', 'sim', 'solve_signature', 'sim_signature'):
+        st.session_state.pop(f'{model_key}_{suffix}', None)
+
+    st.session_state.pop('pending_model_reset', None)
+
 DEFAULT_CALIBRATION = {
     'cs': {'beta': 0.95, 'r': 0.03, 'gamma': 2.0},
     'rc': {'beta': 0.95, 'alpha': 0.33, 'delta': 0.08, 'gamma': 2.0},
@@ -322,6 +366,10 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 st.title("Macroeconomic Models Dashboard")
+runtime_app_path = os.path.abspath(__file__)
+runtime_cwd = os.getcwd()
+st.caption(f"Running file: `{runtime_app_path}` | CWD: `{runtime_cwd}`")
+st.sidebar.caption(f"Running file: `{runtime_app_path}`")
 st.markdown("""
 Interactive dashboard for solving and simulating three canonical macroeconomic models 
 using **Value Function Iteration (VFI)**.  
@@ -356,6 +404,7 @@ st.sidebar.markdown("---")
 # MODEL 1: CONSUMPTION-SAVINGS
 # ============================================================================
 if model_choice == "Model 1: Consumption-Savings":
+    apply_pending_reset_if_needed('cs')
     st.header("Stochastic Consumption-Savings Model")
     
     col1, col2 = st.columns(2)
@@ -404,7 +453,7 @@ if model_choice == "Model 1: Consumption-Savings":
         a_max = st.slider("Asset grid maximum", 5.0, 100.0, 50.0, 1.0, key="cs_a_max")
         n_a = st.slider("Asset grid resolution", 50, 250, 90, 10, key="cs_n_a")
 
-    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+    with st.sidebar.expander("Section 4: Markov Shock Process (Income)", expanded=False):
         y_low = st.slider("Low income value", 0.2, 2.0, 0.8, 0.05, key="cs_y_low")
         y_high = st.slider("High income value", 0.2, 3.0, 1.2, 0.05, key="cs_y_high")
         if y_high <= y_low:
@@ -441,22 +490,38 @@ if model_choice == "Model 1: Consumption-Savings":
     
     solve_clicked = False
     simulate_clicked = False
-    reset_clicked = False
     with st.sidebar.expander("Section 6: Run Controls", expanded=True):
         solve_clicked = st.button("Solve model", key="cs_solve", use_container_width=True)
         simulate_clicked = st.button("Simulate path", key="cs_simulate_sidebar", use_container_width=True)
-        reset_clicked = st.button("Reset to defaults", key="cs_reset_defaults", use_container_width=True)
+        st.button(
+            "Reset to defaults",
+            key="cs_reset_defaults",
+            use_container_width=True,
+            on_click=queue_model_reset,
+            args=('cs',),
+        )
 
-    if reset_clicked:
-        for key, value in MODEL_SIDEBAR_DEFAULTS['cs'].items():
-            st.session_state[key] = value
-        st.session_state.pop('cs_model', None)
-        st.session_state.pop('cs_result', None)
-        st.session_state.pop('cs_sim', None)
-        st.rerun()
+    current_cs_solve_signature = (
+        round(float(beta), 8),
+        round(float(r), 8),
+        round(float(sigma), 8),
+        int(n_a),
+        round(float(a_min), 8),
+        round(float(a_max), 8),
+        round(float(y_low), 8),
+        round(float(y_high), 8),
+        round(float(p_stay_low), 8),
+        round(float(p_stay_high), 8),
+    )
+    cs_prev_solve_signature = st.session_state.get('cs_solve_signature')
+    cs_should_solve = (
+        solve_clicked
+        or 'cs_model' not in st.session_state
+        or cs_prev_solve_signature != current_cs_solve_signature
+    )
 
-    # Solve model
-    if solve_clicked:
+    # Solve model (auto-runs when sidebar parameters change)
+    if cs_should_solve:
         with st.spinner("Solving Consumption-Savings model with VFI..."):
             try:
                 model = ConsumptionSavingsModel(
@@ -475,6 +540,8 @@ if model_choice == "Model 1: Consumption-Savings":
                 st.session_state.cs_model = model
                 st.session_state.cs_result = result
                 st.session_state.pop('cs_sim', None)
+                st.session_state.cs_solve_signature = current_cs_solve_signature
+                st.session_state.pop('cs_sim_signature', None)
                 if result.get('converged'):
                     st.success("Consumption-Savings model solved (converged)")
                 else:
@@ -484,7 +551,21 @@ if model_choice == "Model 1: Consumption-Savings":
                 import traceback
                 st.text(traceback.format_exc())
 
-    if simulate_clicked:
+    current_cs_sim_signature = (
+        int(sim_length),
+        round(float(initial_a), 8),
+        str(initial_income_state),
+        int(random_seed),
+        current_cs_solve_signature,
+    )
+    cs_prev_sim_signature = st.session_state.get('cs_sim_signature')
+    cs_should_simulate = (
+        simulate_clicked
+        or ('cs_model' in st.session_state and 'cs_sim' not in st.session_state)
+        or cs_prev_sim_signature != current_cs_sim_signature
+    )
+
+    if cs_should_simulate:
         if 'cs_model' not in st.session_state:
             st.warning("Solve the model first before simulating.")
         else:
@@ -496,6 +577,7 @@ if model_choice == "Model 1: Consumption-Savings":
                     random_seed=int(random_seed),
                     initial_y_state=init_idx,
                 )
+                st.session_state.cs_sim_signature = current_cs_sim_signature
             st.success("Simulation complete.")
     
     # Display results
@@ -574,6 +656,22 @@ if model_choice == "Model 1: Consumption-Savings":
             )
             st.plotly_chart(fig, use_container_width=True)
 
+        st.markdown("### Static Intuition")
+        beta_grid = np.linspace(0.90, 0.99, 25)
+        savings_share = (beta_grid * (1.0 + r)) / (1.0 + beta_grid * (1.0 + r))
+        fig_static = plot_multiple_series(
+            beta_grid,
+            {'Implied Savings Share': savings_share},
+            title="Patience and Savings Tendency (Static Intuition)",
+        )
+        st.plotly_chart(fig_static, use_container_width=True)
+        st.caption("Higher beta increases the value of future utility, which raises the savings propensity in this static mapping.")
+        static_df = pd.DataFrame({
+            'beta': beta_grid,
+            'implied_savings_share': savings_share,
+        })
+        render_static_downloads(fig_static, static_df, "model1_consumption_savings", "cs_static")
+
         st.markdown("### 3. Simulation Plots")
         if 'cs_sim' in st.session_state:
             sim = st.session_state.cs_sim
@@ -588,6 +686,33 @@ if model_choice == "Model 1: Consumption-Savings":
                 title="Simulated Paths"
             )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Dynamic economic analysis based on live moments
+            st.markdown("#### 📊 Dynamic Economic Analysis")
+            c_moms = compute_moments(sim['c'])
+            a_moms = compute_moments(sim['a'][:-1])
+            y_moms = compute_moments(sim['y'])
+            cy_corr = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")['correlation']
+            ay_corr = compute_correlations(sim['a'][:-1], sim['y'], "Assets", "Income")['correlation']
+            
+            volatility_ratio = np.sqrt(c_moms['variance']) / np.sqrt(y_moms['variance']) if y_moms['variance'] > 0 else 0
+            smoothing_quality = "strong" if volatility_ratio < 0.5 else "moderate" if volatility_ratio < 0.8 else "weak"
+            
+            persistence_desc = "highly persistent" if c_moms['autocorr_lag1'] > 0.7 else "moderately persistent" if c_moms['autocorr_lag1'] > 0.4 else "weakly persistent"
+            
+            comovement_desc = "tightly procyclical" if cy_corr > 0.7 else "moderately procyclical" if cy_corr > 0.4 else "weakly procyclical" if cy_corr > 0 else "countercyclical"
+            
+            st.markdown(
+                f"The simulated consumption path exhibits **{smoothing_quality} consumption smoothing**, "
+                f"with a standard deviation ratio of **{volatility_ratio:.3f}** relative to income volatility. "
+                f"This indicates the agent is {'effectively buffering income shocks through savings/dissavings' if volatility_ratio < 0.6 else 'partially smoothing but still exposed to substantial income fluctuations'}. "
+                f"The consumption series is **{persistence_desc}** (autocorr = {c_moms['autocorr_lag1']:.3f}), "
+                f"suggesting {'durable consumption patterns that respond slowly to shocks' if c_moms['autocorr_lag1'] > 0.6 else 'more responsive adjustment to new information'}. "
+                f"The correlation with income is **{cy_corr:.3f}**, meaning consumption is **{comovement_desc}**—"
+                f"{'the agent tracks income closely despite attempting to smooth' if abs(cy_corr) > 0.5 else 'the agent successfully decouples consumption from short-run income variations'}. "
+                f"Average asset holdings of **{a_moms['mean']:.3f}** {'provide substantial buffer capacity' if a_moms['mean'] > 2.0 else 'indicate moderate precautionary savings' if a_moms['mean'] > 0.5 else 'suggest binding borrowing constraints'}, "
+                f"with asset-income correlation of **{ay_corr:.3f}** showing that assets {'accumulate during high-income periods' if ay_corr > 0.3 else 'remain relatively stable across the income cycle' if ay_corr > -0.3 else 'unexpectedly decline when income rises'}."
+            )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
 
@@ -616,9 +741,9 @@ if model_choice == "Model 1: Consumption-Savings":
         st.markdown("### 5. Forecast Panel")
         if 'cs_sim' in st.session_state:
             sim = st.session_state.cs_sim
-            forecast_len = 10
+            forecast_len = int(forecast_horizon)
             plan_text = st.text_input(
-                "Enter next shocks (comma-separated Low/High)",
+                "Enter next income shocks (comma-separated Low/High)",
                 value="Low,High,High,Low",
                 key="cs_forecast_shock_plan",
             )
@@ -640,7 +765,7 @@ if model_choice == "Model 1: Consumption-Savings":
             fig = plot_multiple_series(
                 np.arange(forecast_len),
                 {'Consumption Forecast': c_fore, 'Assets Forecast': a_fore, 'Income Shock Path': y_fore},
-                title="10-Period Conditional Forecast"
+                title=f"{forecast_len}-Period Conditional Forecast"
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -936,6 +1061,7 @@ if model_choice == "Model 1: Consumption-Savings":
 # MODEL 2: ROBINSON CRUSOE
 # ============================================================================
 elif model_choice == "Model 2: Robinson Crusoe":
+    apply_pending_reset_if_needed('rc')
     st.header("Robinson Crusoe Production Economy")
     
     col1, col2 = st.columns(2)
@@ -974,7 +1100,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
             k_max = k_min + 1.0
         n_k = st.slider("Capital grid resolution", 50, 250, 90, 10, key="rc_n_k")
 
-    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+    with st.sidebar.expander("Section 4: Markov Shock Process (TFP)", expanded=False):
         z_low = st.slider("Low TFP", 0.3, 1.5, 0.9, 0.05, key="rc_z_low")
         z_high = st.slider("High TFP", 0.5, 2.5, 1.1, 0.05, key="rc_z_high")
         if z_high <= z_low:
@@ -1009,22 +1135,39 @@ elif model_choice == "Model 2: Robinson Crusoe":
     
     solve_clicked = False
     simulate_clicked = False
-    reset_clicked = False
     with st.sidebar.expander("Section 6: Run Controls", expanded=True):
         solve_clicked = st.button("Solve model", key="rc_solve", use_container_width=True)
         simulate_clicked = st.button("Simulate path", key="rc_simulate_sidebar", use_container_width=True)
-        reset_clicked = st.button("Reset to defaults", key="rc_reset_defaults", use_container_width=True)
+        st.button(
+            "Reset to defaults",
+            key="rc_reset_defaults",
+            use_container_width=True,
+            on_click=queue_model_reset,
+            args=('rc',),
+        )
 
-    if reset_clicked:
-        for key, value in MODEL_SIDEBAR_DEFAULTS['rc'].items():
-            st.session_state[key] = value
-        st.session_state.pop('rc_model', None)
-        st.session_state.pop('rc_result', None)
-        st.session_state.pop('rc_sim', None)
-        st.rerun()
+    current_rc_solve_signature = (
+        round(float(beta), 8),
+        round(float(sigma), 8),
+        round(float(alpha), 8),
+        round(float(delta), 8),
+        int(n_k),
+        round(float(k_min), 8),
+        round(float(k_max), 8),
+        round(float(z_low), 8),
+        round(float(z_high), 8),
+        round(float(p_stay_low), 8),
+        round(float(p_stay_high), 8),
+    )
+    rc_prev_solve_signature = st.session_state.get('rc_solve_signature')
+    rc_should_solve = (
+        solve_clicked
+        or 'rc_model' not in st.session_state
+        or rc_prev_solve_signature != current_rc_solve_signature
+    )
 
-    # Solve model
-    if solve_clicked:
+    # Solve model (auto-runs when sidebar parameters change)
+    if rc_should_solve:
         with st.spinner("Solving Robinson Crusoe model with VFI..."):
             try:
                 model = RobinsonCrusoeModel(
@@ -1044,6 +1187,8 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 st.session_state.rc_model = model
                 st.session_state.rc_result = result
                 st.session_state.pop('rc_sim', None)
+                st.session_state.rc_solve_signature = current_rc_solve_signature
+                st.session_state.pop('rc_sim_signature', None)
                 if result.get('converged'):
                     st.success("Robinson Crusoe model solved (converged)")
                 else:
@@ -1053,7 +1198,20 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 import traceback
                 st.text(traceback.format_exc())
 
-    if simulate_clicked:
+    current_rc_sim_signature = (
+        int(sim_length),
+        round(float(initial_k), 8),
+        int(random_seed),
+        current_rc_solve_signature,
+    )
+    rc_prev_sim_signature = st.session_state.get('rc_sim_signature')
+    rc_should_simulate = (
+        simulate_clicked
+        or ('rc_model' in st.session_state and 'rc_sim' not in st.session_state)
+        or rc_prev_sim_signature != current_rc_sim_signature
+    )
+
+    if rc_should_simulate:
         if 'rc_model' not in st.session_state:
             st.warning("Solve the model first before simulating.")
         else:
@@ -1064,6 +1222,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
                     random_seed=int(random_seed),
                     initial_z_state=0,
                 )
+                st.session_state.rc_sim_signature = current_rc_sim_signature
             st.success("Simulation complete.")
     
     # Display results
@@ -1144,6 +1303,23 @@ elif model_choice == "Model 2: Robinson Crusoe":
             )
             st.plotly_chart(fig, use_container_width=True)
 
+        st.markdown("### Static Intuition")
+        beta_grid = np.linspace(0.90, 0.99, 25)
+        denom = np.maximum(1.0 - beta_grid * (1.0 - delta), 1e-6)
+        k_ss = np.power((alpha * beta_grid) / denom, 1.0 / (1.0 - alpha))
+        fig_static = plot_multiple_series(
+            beta_grid,
+            {'Steady-State Capital k*': k_ss},
+            title="Steady-State Capital vs Patience (Static Intuition)",
+        )
+        st.plotly_chart(fig_static, use_container_width=True)
+        st.caption("With higher beta, agents are more patient, so the steady-state capital stock rises in this deterministic benchmark.")
+        static_df = pd.DataFrame({
+            'beta': beta_grid,
+            'steady_state_capital': k_ss,
+        })
+        render_static_downloads(fig_static, static_df, "model2_robinson_crusoe", "rc_static")
+
         st.markdown("### 3. Simulation Plots")
         if 'rc_sim' in st.session_state:
             sim = st.session_state.rc_sim
@@ -1158,6 +1334,41 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 title="Simulated Paths"
             )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Dynamic economic analysis based on live moments
+            st.markdown("#### 📊 Dynamic Economic Analysis")
+            y_moms = compute_moments(sim['output'])
+            c_moms = compute_moments(sim['c'])
+            k_moms = compute_moments(sim['k'][:-1])
+            cy_corr = compute_correlations(sim['c'], sim['output'], "Consumption", "Output")['correlation']
+            ky_corr = compute_correlations(sim['k'][:-1], sim['output'], "Capital", "Output")['correlation']
+            
+            # Calculate investment
+            investment = np.diff(sim['k']) + delta * sim['k'][:-1]
+            i_moms = compute_moments(investment)
+            iy_corr = compute_correlations(investment, sim['output'], "Investment", "Output")['correlation']
+            
+            output_volatility = np.sqrt(y_moms['variance'])
+            c_volatility = np.sqrt(c_moms['variance'])
+            i_volatility = np.sqrt(i_moms['variance'])
+            
+            cycle_strength = "pronounced" if output_volatility > 0.15 else "moderate" if output_volatility > 0.08 else "mild"
+            business_cycle_pattern = "standard RBC predictions" if (cy_corr > 0.5 and iy_corr > 0.5) else "non-standard co-movement"
+            
+            persistence_desc = "highly persistent shocks" if y_moms['autocorr_lag1'] > 0.7 else "moderately persistent shocks" if y_moms['autocorr_lag1'] > 0.4 else "transitory shocks"
+            
+            st.markdown(
+                f"The real business cycle simulation reveals **{cycle_strength} fluctuations** with output volatility of **{output_volatility:.4f}**. "
+                f"This economy exhibits **{business_cycle_pattern}**: consumption correlation with output is **{cy_corr:.3f}** and investment correlation is **{iy_corr:.3f}**. "
+                f"{'Both consumption and investment move procyclically, matching empirical business cycle regularities' if (cy_corr > 0.5 and iy_corr > 0.5) else 'The correlation patterns deviate from typical business cycle facts, possibly due to parameter choices'}. "
+                f"Investment is **{'more volatile than output' if i_volatility > output_volatility else 'less volatile than output'}** (ratio: {i_volatility/output_volatility:.2f}), "
+                f"{'consistent with the empirical finding that investment is the most volatile GDP component' if i_volatility > output_volatility else 'which is unusual for standard RBC models'}. "
+                f"Output autocorrelation of **{y_moms['autocorr_lag1']:.3f}** indicates **{persistence_desc}**, "
+                f"{'generating realistic business cycle persistence' if y_moms['autocorr_lag1'] > 0.6 else 'producing relatively transitory fluctuations'}. "
+                f"The average capital stock of **{k_moms['mean']:.3f}** {'exceeds steady-state predictions, indicating the shock process favors high-TFP states' if k_moms['mean'] > 5.0 else 'remains near steady-state levels'}. "
+                f"Capital-output correlation of **{ky_corr:.3f}** shows {'the expected positive relationship' if ky_corr > 0.3 else 'surprisingly weak co-movement, possibly due to offsetting effects'}, "
+                f"reflecting the {'capacity expansion during booms' if ky_corr > 0.3 else 'complex dynamic response to TFP shocks'}."
+            )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
 
@@ -1186,9 +1397,9 @@ elif model_choice == "Model 2: Robinson Crusoe":
         st.markdown("### 5. Forecast Panel")
         if 'rc_sim' in st.session_state:
             sim = st.session_state.rc_sim
-            forecast_len = 10
+            forecast_len = int(forecast_horizon)
             plan_text = st.text_input(
-                "Enter next shocks (comma-separated Low/High)",
+                "Enter next TFP shocks (comma-separated Low/High)",
                 value="Low,High,High,Low",
                 key="rc_forecast_shock_plan",
             )
@@ -1211,7 +1422,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
             fig = plot_multiple_series(
                 np.arange(forecast_len),
                 {'Consumption Forecast': c_fore, 'Capital Forecast': k_fore, 'Output Forecast': y_fore},
-                title="10-Period Conditional Forecast"
+                title=f"{forecast_len}-Period Conditional Forecast"
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
@@ -1501,6 +1712,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
 # MODEL 3: LABOR SUPPLY
 # ============================================================================
 elif model_choice == "Model 3: Endogenous Labor Supply":
+    apply_pending_reset_if_needed('ls')
     st.header("Endogenous Labor Supply Model")
     
     col1, col2 = st.columns(2)
@@ -1534,7 +1746,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         r = st.slider("Interest rate (r)", 0.00, 0.10, calibration.get('r', 0.05), 0.005, key="ls_r")
         n_a = st.slider("Asset grid resolution", 40, 180, 80, 10, key="ls_n_a")
 
-    with st.sidebar.expander("Section 4: Markov Shock Process", expanded=False):
+    with st.sidebar.expander("Section 4: Markov Shock Process (Wage Rate)", expanded=False):
         w_low = st.slider("Low wage", 0.2, 2.0, 0.8, 0.05, key="ls_w_low")
         w_high = st.slider("High wage", 0.3, 3.0, 1.2, 0.05, key="ls_w_high")
         if w_high <= w_low:
@@ -1571,22 +1783,38 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
     
     solve_clicked = False
     simulate_clicked = False
-    reset_clicked = False
     with st.sidebar.expander("Section 6: Run Controls", expanded=True):
         solve_clicked = st.button("Solve model", key="ls_solve", use_container_width=True)
         simulate_clicked = st.button("Simulate path", key="ls_simulate_sidebar", use_container_width=True)
-        reset_clicked = st.button("Reset to defaults", key="ls_reset_defaults", use_container_width=True)
+        st.button(
+            "Reset to defaults",
+            key="ls_reset_defaults",
+            use_container_width=True,
+            on_click=queue_model_reset,
+            args=('ls',),
+        )
 
-    if reset_clicked:
-        for key, value in MODEL_SIDEBAR_DEFAULTS['ls'].items():
-            st.session_state[key] = value
-        st.session_state.pop('ls_model', None)
-        st.session_state.pop('ls_result', None)
-        st.session_state.pop('ls_sim', None)
-        st.rerun()
+    current_ls_solve_signature = (
+        round(float(beta), 8),
+        round(float(r), 8),
+        round(float(sigma), 8),
+        round(float(phi), 8),
+        round(float(eta), 8),
+        int(n_a),
+        round(float(w_low), 8),
+        round(float(w_high), 8),
+        round(float(p_stay_low), 8),
+        round(float(p_stay_high), 8),
+    )
+    ls_prev_solve_signature = st.session_state.get('ls_solve_signature')
+    ls_should_solve = (
+        solve_clicked
+        or 'ls_model' not in st.session_state
+        or ls_prev_solve_signature != current_ls_solve_signature
+    )
 
-    # Solve model
-    if solve_clicked:
+    # Solve model (auto-runs when sidebar parameters change)
+    if ls_should_solve:
         with st.spinner("Solving Labor Supply model with VFI..."):
             try:
                 model = LaborSupplyModel(
@@ -1605,6 +1833,8 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 st.session_state.ls_model = model
                 st.session_state.ls_result = result
                 st.session_state.pop('ls_sim', None)
+                st.session_state.ls_solve_signature = current_ls_solve_signature
+                st.session_state.pop('ls_sim_signature', None)
                 if result.get('converged'):
                     st.success("Labor Supply model solved (converged)")
                 else:
@@ -1614,7 +1844,21 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 import traceback
                 st.text(traceback.format_exc())
 
-    if simulate_clicked:
+    current_ls_sim_signature = (
+        int(sim_length),
+        round(float(initial_a), 8),
+        str(initial_wage_state),
+        int(random_seed),
+        current_ls_solve_signature,
+    )
+    ls_prev_sim_signature = st.session_state.get('ls_sim_signature')
+    ls_should_simulate = (
+        simulate_clicked
+        or ('ls_model' in st.session_state and 'ls_sim' not in st.session_state)
+        or ls_prev_sim_signature != current_ls_sim_signature
+    )
+
+    if ls_should_simulate:
         if 'ls_model' not in st.session_state:
             st.warning("Solve the model first before simulating.")
         else:
@@ -1626,6 +1870,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                     random_seed=int(random_seed),
                     initial_w_state=init_w_idx,
                 )
+                st.session_state.ls_sim_signature = current_ls_sim_signature
             st.success("Simulation complete.")
     
     # Display results
@@ -1729,6 +1974,23 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         )
         st.plotly_chart(fig_leisure, use_container_width=True)
 
+        st.markdown("### Static Intuition")
+        wage_grid = np.linspace(max(0.1, w_low * 0.7), w_high * 1.3, 40)
+        c_ref = max(np.mean(model.policy_c), 1e-4)
+        labor_static = np.clip(((wage_grid * (c_ref ** (-sigma))) / max(phi, 1e-6)) ** eta, 0.0, 1.0)
+        fig_static = plot_multiple_series(
+            wage_grid,
+            {'Static Labor Supply l(w)': labor_static},
+            title="Intra-temporal Labor Supply Curve (Static Intuition)",
+        )
+        st.plotly_chart(fig_static, use_container_width=True)
+        st.caption("Holding consumption fixed, higher wages increase labor supply through the substitution effect in this static relation.")
+        static_df = pd.DataFrame({
+            'wage': wage_grid,
+            'static_labor_supply': labor_static,
+        })
+        render_static_downloads(fig_static, static_df, "model3_labor_supply", "ls_static")
+
         st.markdown("### 3. Simulation Plots")
         if 'ls_sim' in st.session_state:
             sim = st.session_state.ls_sim
@@ -1737,6 +1999,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 t_idx,
                 {
                     'Consumption': sim['c'],
+                    'Savings/Assets': sim['a'][:-1],
                     'Labor': sim['l'],
                     'Wage': sim['w'],
                     'Income': sim['y'],
@@ -1744,6 +2007,43 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 title="Simulated Paths"
             )
             st.plotly_chart(fig, use_container_width=True)
+            
+            # Dynamic economic analysis based on live moments
+            st.markdown("#### 📊 Dynamic Economic Analysis")
+            c_moms = compute_moments(sim['c'])
+            l_moms = compute_moments(sim['l'])
+            w_moms = compute_moments(sim['w'])
+            y_moms = compute_moments(sim['y'])
+            lw_corr = compute_correlations(sim['l'], sim['w'], "Labor", "Wage")['correlation']
+            cy_corr = compute_correlations(sim['c'], sim['y'], "Consumption", "Income")['correlation']
+            cw_corr = compute_correlations(sim['c'], sim['w'], "Consumption", "Wage")['correlation']
+            
+            # Calculate Frisch elasticity approximation
+            leisure = 1.0 - sim['l']
+            avg_leisure = np.mean(leisure)
+            labor_response = "strong" if abs(lw_corr) > 0.5 else "moderate" if abs(lw_corr) > 0.25 else "weak"
+            
+            substitution_dominance = "substitution effect dominant" if lw_corr > 0.3 else "income effect dominant" if lw_corr < -0.2 else "offsetting income and substitution effects"
+            
+            labor_volatility = np.sqrt(l_moms['variance'])
+            wage_volatility = np.sqrt(w_moms['variance'])
+            labor_wage_ratio = labor_volatility / wage_volatility if wage_volatility > 0 else 0
+            
+            st.markdown(
+                f"The labor supply model generates **{labor_response} labor supply responses** to wage fluctuations, "
+                f"with labor-wage correlation of **{lw_corr:.3f}**. "
+                f"This indicates **{substitution_dominance}**: "
+                f"{'when wages rise, the agent works more hours, sacrificing leisure for higher income' if lw_corr > 0.3 else 'when wages rise, the agent reduces hours, consuming leisure from increased wealth' if lw_corr < -0.2 else 'income and substitution effects roughly cancel, producing limited hours adjustment'}. "
+                f"The average labor supply is **{l_moms['mean']:.3f}** (average leisure: **{avg_leisure:.3f}**), "
+                f"{'indicating substantial labor market participation' if l_moms['mean'] > 0.5 else 'suggesting preference for leisure dominates' if l_moms['mean'] < 0.3 else 'showing balanced work-leisure allocation'}. "
+                f"Labor volatility relative to wages is **{labor_wage_ratio:.3f}**, meaning the labor supply elasticity is "
+                f"{'highly elastic—hours respond strongly to wage changes' if labor_wage_ratio > 1.0 else 'moderately elastic' if labor_wage_ratio > 0.5 else 'relatively inelastic—hours remain fairly stable despite wage fluctuations'}. "
+                f"Consumption-wage correlation of **{cw_corr:.3f}** shows {'consumption tracks wages closely through the income channel' if cw_corr > 0.5 else 'consumption is partially insulated from wage shocks through inter-temporal smoothing'}. "
+                f"The consumption-income correlation of **{cy_corr:.3f}** reveals {'tight coupling' if cy_corr > 0.7 else 'moderate coupling' if cy_corr > 0.4 else 'weak coupling'}, "
+                f"suggesting the agent is {'constrained in smoothing or highly responsive to current income' if cy_corr > 0.6 else 'successfully smoothing consumption through savings decisions'}. "
+                f"Labor autocorrelation of **{l_moms['autocorr_lag1']:.3f}** indicates "
+                f"{'persistent labor supply patterns, possibly from wage persistence or habit formation' if l_moms['autocorr_lag1'] > 0.5 else 'flexible labor adjustment to current wage conditions'}."
+            )
         else:
             st.info("Run simulation from sidebar Section 6 to view simulation plots.")
 
@@ -1753,6 +2053,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
             rows = []
             for name, series in [
                 ("Consumption", sim['c']),
+                ("Savings/Assets", sim['a'][:-1]),
                 ("Labor", sim['l']),
                 ("Wage", sim['w']),
                 ("Income", sim['y']),
@@ -1773,9 +2074,9 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         st.markdown("### 5. Forecast Panel")
         if 'ls_sim' in st.session_state:
             sim = st.session_state.ls_sim
-            forecast_len = 10
+            forecast_len = int(forecast_horizon)
             plan_text = st.text_input(
-                "Enter next shocks (comma-separated Low/High)",
+                "Enter next wage shocks (comma-separated Low/High)",
                 value="Low,High,High,Low",
                 key="ls_forecast_shock_plan",
             )
@@ -1805,7 +2106,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                     'Wage Path': w_fore,
                     'Income Forecast': y_fore,
                 },
-                title="10-Period Conditional Forecast"
+                title=f"{forecast_len}-Period Conditional Forecast"
             )
             st.plotly_chart(fig, use_container_width=True)
         else:
