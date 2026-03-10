@@ -730,32 +730,10 @@ if model_choice == "Model 1: Consumption-Savings":
         )
 
         st.markdown("### 2. Policy Functions")
-        shock_labels = ["Low Income State", "High Income State"] if model.n_y == 2 else None
-        col1, col2 = st.columns(2)
-        with col1:
-            fig = get_cached_plot(
-                'cs_policy_a_ordered',
-                plot_policy_function,
-                model.a_grid, model.policy_a,
-                title="Savings Policy a'(a, z)",
-                state_label="Assets (a)",
-                action_label="Next Assets (a')",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            fig = get_cached_plot(
-                'cs_policy_c_ordered',
-                plot_policy_function,
-                model.a_grid, model.policy_c,
-                title="Consumption Policy c(a, z)",
-                state_label="Assets (a)",
-                action_label="Consumption (c)",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current assets and the income state affect optimal current consumption and next-period savings."
+        )
 
         st.markdown("### Static Intuition")
         beta_grid = np.linspace(0.90, 0.99, 25)
@@ -1324,32 +1302,10 @@ elif model_choice == "Model 2: Robinson Crusoe":
         )
 
         st.markdown("### 2. Policy Functions")
-        shock_labels = ["Low TFP", "High TFP"] if model.n_z == 2 else None
-        col1, col2 = st.columns(2)
-        with col1:
-            fig = get_cached_plot(
-                'rc_policy_k_ordered',
-                plot_policy_function,
-                model.k_grid, model.policy_k,
-                title="Capital Policy k'(k, z)",
-                state_label="Capital (k)",
-                action_label="Next Capital (k')",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            fig = get_cached_plot(
-                'rc_policy_c_ordered',
-                plot_policy_function,
-                model.k_grid, model.policy_c,
-                title="Consumption Policy c(k, z)",
-                state_label="Capital (k)",
-                action_label="Consumption (c)",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current capital and the productivity state affect optimal consumption and next-period capital."
+        )
 
         st.markdown("### Static Intuition")
         beta_grid = np.linspace(0.90, 0.99, 25)
@@ -1921,57 +1877,10 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         )
 
         st.markdown("### 2. Policy Functions")
-        shock_labels = ["Low Wage State", "High Wage State"] if model.n_w == 2 else None
-        col1, col2, col3 = st.columns(3)
-        with col1:
-            fig = get_cached_plot(
-                'ls_policy_c_ordered',
-                plot_policy_function,
-                model.a_grid, model.policy_c,
-                title="Consumption Policy c(a, w)",
-                state_label="Assets (a)",
-                action_label="Consumption (c)",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        with col2:
-            fig = get_cached_plot(
-                'ls_policy_l_ordered',
-                plot_policy_function,
-                model.a_grid, model.policy_l,
-                title="Labor Policy l(a, w)",
-                state_label="Assets (a)",
-                action_label="Labor (l)",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-        with col3:
-            fig = get_cached_plot(
-                'ls_policy_a_ordered',
-                plot_policy_function,
-                model.a_grid, model.policy_a,
-                title="Savings Policy a'(a, w)",
-                state_label="Assets (a)",
-                action_label="Next Assets (a')",
-                shock_labels=shock_labels,
-                max_legend_items=3,
-            )
-            st.plotly_chart(fig, use_container_width=True)
-
-        fig_leisure = get_cached_plot(
-            'ls_policy_leisure_ordered',
-            plot_policy_function,
-            model.a_grid,
-            1.0 - model.policy_l,
-            title="Leisure Implied from Labor: 1 - l(a, w)",
-            state_label="Assets (a)",
-            action_label="Leisure",
-            shock_labels=shock_labels,
-            max_legend_items=3,
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current assets and the wage state affect optimal consumption, labor, leisure, and next-period savings."
         )
-        st.plotly_chart(fig_leisure, use_container_width=True)
 
         st.markdown("### Static Intuition")
         wage_grid = np.linspace(max(0.1, w_low * 0.7), w_high * 1.3, 40)
