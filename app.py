@@ -178,7 +178,7 @@ MODEL_SIDEBAR_DEFAULTS = {
         'ls_phi': 1.5,
         'ls_eta': 0.8,
         'ls_r': 0.05,
-        'ls_n_a': 80,
+        'ls_n_a': 60,
         'ls_w_low': 0.8,
         'ls_w_high': 1.2,
         'ls_p_stay_low': 0.90,
@@ -188,6 +188,7 @@ MODEL_SIDEBAR_DEFAULTS = {
         'ls_init_wage_state': 'Low',
         'ls_seed': 42,
         'ls_forecast_horizon': 10,
+        'ls_high_accuracy': False,
     },
 }
 
@@ -1740,7 +1741,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
 
     with st.sidebar.expander("Section 3: Technology or Budget", expanded=False):
         r = st.slider("Interest rate (r)", 0.00, 0.10, calibration.get('r', 0.05), 0.005, key="ls_r")
-        n_a = st.slider("Asset grid resolution", 40, 180, 80, 10, key="ls_n_a")
+        n_a = st.slider("Asset grid resolution", 40, 180, 60, 10, key="ls_n_a")
 
     with st.sidebar.expander("Section 4: Markov Shock Process (Wage Rate)", expanded=False):
         w_low = st.slider("Low wage", 0.2, 2.0, 0.8, 0.05, key="ls_w_low")
@@ -1772,6 +1773,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         initial_wage_state = st.selectbox("Initial wage state", ["Low", "High"], key="ls_init_wage_state")
         random_seed = st.number_input("Random seed", min_value=0, max_value=100000, value=42, step=1, key="ls_seed")
         forecast_horizon = st.slider("Forecast horizon", 5, 30, 10, 1, key="ls_forecast_horizon")
+        high_accuracy = st.checkbox("High accuracy mode (slower)", value=False, key="ls_high_accuracy")
 
     # Compatibility parameters when custom wage process is provided
     rho = 0.0
@@ -1825,7 +1827,9 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                     w_grid=np.array([w_low, w_high]),
                     P_w=wage_transition,
                 )
-                result = model.solve(verbose=False)
+                ls_tol = 5e-5 if high_accuracy else 1e-4
+                ls_max_iter = 350 if high_accuracy else 250
+                result = model.solve(tol=ls_tol, max_iter=ls_max_iter, verbose=False)
                 st.session_state.ls_model = model
                 st.session_state.ls_result = result
                 st.session_state.pop('ls_sim', None)

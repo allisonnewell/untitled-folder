@@ -454,7 +454,7 @@ class LaborSupplyModel:
         eta,
         rho,
         sigma_w,
-        n_a=80,
+        n_a=60,
         a_min=0.01,
         a_max=50,
         w_grid=None,
@@ -509,23 +509,30 @@ class LaborSupplyModel:
         V_old = self.V.copy()
         
         for iteration in range(max_iter):
+            # Build interpolant once per iteration (major speedup vs rebuilding per state).
+            V_interp = interp1d(
+                self.a_grid,
+                self.V[:, :],
+                kind='linear',
+                axis=0,
+                bounds_error=False,
+                fill_value='extrapolate',
+            )
+
             for i_w, w in enumerate(self.w_grid):
                 for i_a, a in enumerate(self.a_grid):
                     # Budget constraint: c = (1+r)*a + w*l - a'
-                    
-                    V_interp = interp1d(self.a_grid, self.V[:, :], kind='linear',
-                                       axis=0, bounds_error=False, fill_value='extrapolate')
                     
                     best_val = -np.inf
                     best_l = 0.5
                     best_a_next = a * 0.9
                     
                     # Reduced grid search for efficiency
-                    l_grid = np.linspace(0, 1, 15)
+                    l_grid = np.linspace(0, 1, 10)
                     resource_max = (1 + self.r) * a + w
                     if resource_max < self.a_min:
                         continue
-                    a_next_grid = np.linspace(self.a_min, resource_max, 20)
+                    a_next_grid = np.linspace(self.a_min, resource_max, 12)
                     
                     for l in l_grid:
                         for a_next in a_next_grid:
