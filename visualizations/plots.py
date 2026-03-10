@@ -175,7 +175,7 @@ def plot_heatmap(x_grid, y_grid, heatmap_data, title="Heatmap",
     return fig
 
 
-def plot_multiple_series(time_index, data_dict, title="Time Series"):
+def plot_multiple_series(time_index, data_dict, title="Time Series", y_label="Level"):
     """
     Plot multiple time series
     
@@ -184,6 +184,7 @@ def plot_multiple_series(time_index, data_dict, title="Time Series"):
     time_index : array-like, time indices
     data_dict : dict, {series_name: data_array}
     title : str
+    y_label : str, y-axis label text
     """
     
     fig = go.Figure()
@@ -204,7 +205,7 @@ def plot_multiple_series(time_index, data_dict, title="Time Series"):
     fig.update_layout(
         title=title,
         xaxis_title='Time Period',
-        yaxis_title='Value',
+        yaxis_title=y_label,
         hovermode='x unified',
         height=400,
         showlegend=True,
@@ -255,7 +256,7 @@ def plot_distribution(data, title="Distribution", bins=40):
     return fig
 
 
-def plot_simulated_path(time_index, data_dict, title="Simulated Path"):
+def plot_simulated_path(time_index, data_dict, title="Simulated Path", y_label="Level"):
     """
     Alias for plot_multiple_series - plots simulated paths
     
@@ -264,8 +265,9 @@ def plot_simulated_path(time_index, data_dict, title="Simulated Path"):
     time_index : array-like, time indices
     data_dict : dict, {series_name: data_array}
     title : str
+    y_label : str, y-axis label text
     """
-    return plot_multiple_series(time_index, data_dict, title)
+    return plot_multiple_series(time_index, data_dict, title, y_label=y_label)
 
 
 def plot_correlation_heatmap(correlation_matrix, labels, title="Correlation Matrix"):

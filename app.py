@@ -937,7 +937,8 @@ if model_choice == "Model 1: Consumption-Savings":
                 fig_c_path = plot_simulated_path(
                     time_idx,
                     {'Consumption': sim['c']},
-                    title="Simulated Consumption Path"
+                    title="Simulated Consumption Path",
+                    y_label="Level of Consumption"
                 )
                 st.plotly_chart(fig_c_path, use_container_width=True)
 
@@ -1542,7 +1543,8 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 fig_cons = plot_simulated_path(
                     time_idx,
                     {'Consumption': sim['c']},
-                    title="Simulated Consumption"
+                    title="Simulated Consumption",
+                    y_label="Level of Consumption"
                 )
                 st.plotly_chart(fig_cons, use_container_width=True)
 
@@ -2204,7 +2206,8 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 fig_c = plot_simulated_path(
                     time_idx,
                     {'Consumption': sim['c']},
-                    title="Simulated Consumption Path"
+                    title="Simulated Consumption Path",
+                    y_label="Level of Consumption"
                 )
                 st.plotly_chart(fig_c, use_container_width=True)
 
