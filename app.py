@@ -131,6 +131,148 @@ def apply_pending_reset_if_needed(model_key):
 
     st.session_state.pop('pending_model_reset', None)
 
+
+def render_model_intro(problem_text, feature_items):
+    """Render the top two-column model intro block in a consistent format.
+
+    Notes:
+    - Keeps copy/paste UI markup out of each model section.
+    - Makes future text edits safer: change one helper instead of three blocks.
+    """
+    col1, col2 = st.columns(2)
+    with col1:
+        st.markdown(f"""
+        **The Problem:** {problem_text}
+        """)
+
+    with col2:
+        bullet_text = "\n".join([f"- {item}" for item in feature_items])
+        st.markdown(f"""
+        **Key Features:**
+        {bullet_text}
+        """)
+
+
+def render_interpretation_box(items):
+    """Render the interpretation list with shared HTML wrapper styling.
+
+    Notes:
+    - Input format: list of (title, description) tuples.
+    - Uses one renderer to avoid drift in wording/style across models.
+    """
+    list_html = "".join([f"<li><strong>{title}:</strong> {desc}</li>" for title, desc in items])
+    st.markdown(
+        f"""
+        <div class="interpretation-box">
+        <strong>What the Model Shows:</strong>
+        <ul>
+        {list_html}
+        </ul>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+
+def render_moments_table(series_specs, benchmark_series, benchmark_name, corr_col_label):
+    """Build and render the moments table for any model.
+
+    Notes:
+    - `series_specs`: list of (display_name, np_array-like).
+    - Correlation is computed against `benchmark_series` except for the benchmark row itself,
+      where correlation is set to 1.0 by definition.
+    - Centralizing this avoids repeating almost identical loops in each model section.
+    """
+    rows = []
+    for name, series in series_specs:
+        moms = compute_moments(series)
+        corr_val = 1.0 if name == benchmark_name else compute_correlations(series, benchmark_series, name, benchmark_name)['correlation']
+        rows.append({
+            'Series': name,
+            'Mean': round(moms['mean'], 4),
+            'Variance': round(moms['variance'], 4),
+            'Autocorr(1)': round(moms['autocorr_lag1'], 4),
+            corr_col_label: round(corr_val, 4),
+        })
+    st.table(pd.DataFrame(rows))
+
+
+def render_run_controls(model_key):
+    """Render standardized sidebar run controls and return click states.
+
+    Notes:
+    - Keeps widget keys deterministic by model key (`cs`, `rc`, `ls`).
+    - Reset is handled via callback to avoid Streamlit state mutation errors.
+    """
+    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
+        solve_clicked = st.button("Solve model", key=f"{model_key}_solve", use_container_width=True)
+        simulate_clicked = st.button("Simulate path", key=f"{model_key}_simulate_sidebar", use_container_width=True)
+        st.button(
+            "Reset to defaults",
+            key=f"{model_key}_reset_defaults",
+            use_container_width=True,
+            on_click=queue_model_reset,
+            args=(model_key,),
+        )
+    return solve_clicked, simulate_clicked
+
+
+def should_auto_solve(model_key, solve_clicked, current_signature):
+    """Return True if model should be solved based on click/state/signature changes."""
+    prev_solve_signature = st.session_state.get(f'{model_key}_solve_signature')
+    return (
+        solve_clicked
+        or f'{model_key}_model' not in st.session_state
+        or prev_solve_signature != current_signature
+    )
+
+
+def should_auto_simulate(model_key, simulate_clicked, current_signature):
+    """Return True if simulation should be rerun based on click/state/signature changes."""
+    prev_sim_signature = st.session_state.get(f'{model_key}_sim_signature')
+    return (
+        simulate_clicked
+        or (f'{model_key}_model' in st.session_state and f'{model_key}_sim' not in st.session_state)
+        or prev_sim_signature != current_signature
+    )
+
+
+def store_solve_result(model_key, model, result, solve_signature):
+    """Persist solved model + metadata and invalidate stale simulations."""
+    st.session_state[f'{model_key}_model'] = model
+    st.session_state[f'{model_key}_result'] = result
+    st.session_state.pop(f'{model_key}_sim', None)
+    st.session_state[f'{model_key}_solve_signature'] = solve_signature
+    st.session_state.pop(f'{model_key}_sim_signature', None)
+
+
+def store_sim_result(model_key, sim_data, sim_signature):
+    """Persist simulation output and signature for change detection."""
+    st.session_state[f'{model_key}_sim'] = sim_data
+    st.session_state[f'{model_key}_sim_signature'] = sim_signature
+
+
+def render_solution_status(metrics):
+    """Render the standard solved banner and metric row.
+
+    Notes:
+    - `metrics` should be a list of `(label, value)` tuples.
+    - Shared renderer keeps status row structure identical across models.
+    """
+    st.markdown(
+        """
+        <div class="summary-box">
+        <strong>Model Successfully Solved!</strong>
+        </div>
+        """,
+        unsafe_allow_html=True,
+    )
+
+    cols = st.columns(len(metrics))
+    for col, (label, value) in zip(cols, metrics):
+        with col:
+            st.metric(label, value)
+
 DEFAULT_CALIBRATION = {
     'cs': {'beta': 0.95, 'r': 0.03, 'gamma': 2.0},
     'rc': {'beta': 0.95, 'alpha': 0.33, 'delta': 0.08, 'gamma': 2.0},
@@ -407,22 +549,16 @@ st.sidebar.markdown("---")
 if model_choice == "Model 1: Consumption-Savings":
     apply_pending_reset_if_needed('cs')
     st.header("Stochastic Consumption-Savings Model")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        **The Problem:** Imagine someone with an unpredictable paycheck who needs to decide 
-        how much to spend today versus save for tomorrow, but they can't borrow money.
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Key Features:**
-        - Income varies randomly (like gig work or seasonal jobs)
-        - Saving for "rainy days" (precautionary savings)
-        - Can't go into debt
-        - Shows why some people save more than others
-        """)
+    render_model_intro(
+        "Imagine someone with an unpredictable paycheck who needs to decide "
+        "how much to spend today versus save for tomorrow, but they can't borrow money.",
+        [
+            "Income varies randomly (like gig work or seasonal jobs)",
+            "Saving for 'rainy days' (precautionary savings)",
+            "Can't go into debt",
+            "Shows why some people save more than others",
+        ],
+    )
     
     # Sidebar parameters
     st.sidebar.subheader("Step 2: Adjust Economic Parameters")
@@ -488,19 +624,8 @@ if model_choice == "Model 1: Consumption-Savings":
     # Keep legacy args for backward compatibility but use custom 2-state process
     rho = 0.0
     sigma_y = 0.1
-    
-    solve_clicked = False
-    simulate_clicked = False
-    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
-        solve_clicked = st.button("Solve model", key="cs_solve", use_container_width=True)
-        simulate_clicked = st.button("Simulate path", key="cs_simulate_sidebar", use_container_width=True)
-        st.button(
-            "Reset to defaults",
-            key="cs_reset_defaults",
-            use_container_width=True,
-            on_click=queue_model_reset,
-            args=('cs',),
-        )
+
+    solve_clicked, simulate_clicked = render_run_controls('cs')
 
     current_cs_solve_signature = (
         round(float(beta), 8),
@@ -514,12 +639,7 @@ if model_choice == "Model 1: Consumption-Savings":
         round(float(p_stay_low), 8),
         round(float(p_stay_high), 8),
     )
-    cs_prev_solve_signature = st.session_state.get('cs_solve_signature')
-    cs_should_solve = (
-        solve_clicked
-        or 'cs_model' not in st.session_state
-        or cs_prev_solve_signature != current_cs_solve_signature
-    )
+    cs_should_solve = should_auto_solve('cs', solve_clicked, current_cs_solve_signature)
 
     # Solve model (auto-runs when sidebar parameters change)
     if cs_should_solve:
@@ -538,11 +658,7 @@ if model_choice == "Model 1: Consumption-Savings":
                     P_y=transition_matrix,
                 )
                 result = model.solve(verbose=False)
-                st.session_state.cs_model = model
-                st.session_state.cs_result = result
-                st.session_state.pop('cs_sim', None)
-                st.session_state.cs_solve_signature = current_cs_solve_signature
-                st.session_state.pop('cs_sim_signature', None)
+                store_solve_result('cs', model, result, current_cs_solve_signature)
                 if result.get('converged'):
                     st.success("Consumption-Savings model solved (converged)")
                 else:
@@ -559,12 +675,7 @@ if model_choice == "Model 1: Consumption-Savings":
         int(random_seed),
         current_cs_solve_signature,
     )
-    cs_prev_sim_signature = st.session_state.get('cs_sim_signature')
-    cs_should_simulate = (
-        simulate_clicked
-        or ('cs_model' in st.session_state and 'cs_sim' not in st.session_state)
-        or cs_prev_sim_signature != current_cs_sim_signature
-    )
+    cs_should_simulate = should_auto_simulate('cs', simulate_clicked, current_cs_sim_signature)
 
     if cs_should_simulate:
         if 'cs_model' not in st.session_state:
@@ -578,7 +689,7 @@ if model_choice == "Model 1: Consumption-Savings":
                     random_seed=int(random_seed),
                     initial_y_state=init_idx,
                 )
-                st.session_state.cs_sim_signature = current_cs_sim_signature
+                store_sim_result('cs', st.session_state.cs_sim, current_cs_sim_signature)
             st.success("Simulation complete.")
     
     # Display results
@@ -586,37 +697,21 @@ if model_choice == "Model 1: Consumption-Savings":
         model = st.session_state.cs_model
         result = st.session_state.cs_result
         
-        # Solution Status Box
-        st.markdown("""
-        <div class="summary-box">
-        <strong>Model Successfully Solved!</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Status", "Converged" if result['converged'] else "Failed")
-        with col2:
-            st.metric("Iterations", result['iterations'])
-        with col3:
-            st.metric("Grid Size", f"{model.n_a} × {model.n_y}")
-        with col4:
-            st.metric("Solution Time", "< 5 sec")
+        render_solution_status([
+            ("Status", "Converged" if result['converged'] else "Failed"),
+            ("Iterations", result['iterations']),
+            ("Grid Size", f"{model.n_a} × {model.n_y}"),
+            ("Solution Time", "< 5 sec"),
+        ])
         
         # Model Summary
         with st.expander("Model Interpretation", expanded=True):
-            st.markdown("""
-            <div class="interpretation-box">
-            <strong>What the Model Shows:</strong>
-            <ul>
-            <li><strong>Decision Rules:</strong> How much to save or spend based on your current wealth</li>
-            <li><strong>Safety Net Behavior:</strong> When income is more uncertain, people save more for emergencies</li>
-            <li><strong>Spending Smoothness:</strong> People try to keep spending steady even when income jumps around</li>
-            <li><strong>Can't Borrow:</strong> When you have little saved, you can't spend more than you earn</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            render_interpretation_box([
+                ("Decision Rules", "How much to save or spend based on your current wealth"),
+                ("Safety Net Behavior", "When income is more uncertain, people save more for emergencies"),
+                ("Spending Smoothness", "People try to keep spending steady even when income jumps around"),
+                ("Can't Borrow", "When you have little saved, you can't spend more than you earn"),
+            ])
         
         st.subheader("Step 5: Model Output")
 
@@ -718,22 +813,16 @@ if model_choice == "Model 1: Consumption-Savings":
         st.markdown("### 4. Moments Table")
         if 'cs_sim' in st.session_state:
             sim = st.session_state.cs_sim
-            rows = []
-            for name, series in [
-                ("Consumption", sim['c']),
-                ("Assets", sim['a'][:-1]),
-                ("Income", sim['y']),
-            ]:
-                moms = compute_moments(series)
-                corr_val = 1.0 if name == "Income" else compute_correlations(series, sim['y'], name, "Income")['correlation']
-                rows.append({
-                    'Series': name,
-                    'Mean': round(moms['mean'], 4),
-                    'Variance': round(moms['variance'], 4),
-                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
-                    'Corr with Income': round(corr_val, 4),
-                })
-            st.table(pd.DataFrame(rows))
+            render_moments_table(
+                series_specs=[
+                    ("Consumption", sim['c']),
+                    ("Assets", sim['a'][:-1]),
+                    ("Income", sim['y']),
+                ],
+                benchmark_series=sim['y'],
+                benchmark_name="Income",
+                corr_col_label="Corr with Income",
+            )
         else:
             st.info("Run simulation to compute moments table.")
 
@@ -1062,22 +1151,16 @@ if model_choice == "Model 1: Consumption-Savings":
 elif model_choice == "Model 2: Robinson Crusoe":
     apply_pending_reset_if_needed('rc')
     st.header("Robinson Crusoe Production Economy")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        **The Problem:** Like Robinson Crusoe on an island, someone uses tools and equipment 
-        (capital) to produce goods, then decides whether to consume them or build better tools.
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Key Features:**
-        - Building up equipment over time
-        - Random good days and bad days (productivity shocks)
-        - Choosing between enjoying today vs. investing for tomorrow
-        - Shows how economies expand and contract
-        """)
+    render_model_intro(
+        "Like Robinson Crusoe on an island, someone uses tools and equipment "
+        "(capital) to produce goods, then decides whether to consume them or build better tools.",
+        [
+            "Building up equipment over time",
+            "Random good days and bad days (productivity shocks)",
+            "Choosing between enjoying today vs. investing for tomorrow",
+            "Shows how economies expand and contract",
+        ],
+    )
     
     # Sidebar parameters
     st.sidebar.subheader("Step 2: Adjust Economic Parameters")
@@ -1131,19 +1214,8 @@ elif model_choice == "Model 2: Robinson Crusoe":
     # Kept for compatibility with constructor signature when using custom TFP chain
     rho = 0.0
     sigma_z = 0.1
-    
-    solve_clicked = False
-    simulate_clicked = False
-    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
-        solve_clicked = st.button("Solve model", key="rc_solve", use_container_width=True)
-        simulate_clicked = st.button("Simulate path", key="rc_simulate_sidebar", use_container_width=True)
-        st.button(
-            "Reset to defaults",
-            key="rc_reset_defaults",
-            use_container_width=True,
-            on_click=queue_model_reset,
-            args=('rc',),
-        )
+
+    solve_clicked, simulate_clicked = render_run_controls('rc')
 
     current_rc_solve_signature = (
         round(float(beta), 8),
@@ -1158,12 +1230,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
         round(float(p_stay_low), 8),
         round(float(p_stay_high), 8),
     )
-    rc_prev_solve_signature = st.session_state.get('rc_solve_signature')
-    rc_should_solve = (
-        solve_clicked
-        or 'rc_model' not in st.session_state
-        or rc_prev_solve_signature != current_rc_solve_signature
-    )
+    rc_should_solve = should_auto_solve('rc', solve_clicked, current_rc_solve_signature)
 
     # Solve model (auto-runs when sidebar parameters change)
     if rc_should_solve:
@@ -1183,11 +1250,7 @@ elif model_choice == "Model 2: Robinson Crusoe":
                     P_z=tfp_transition,
                 )
                 result = model.solve(verbose=False)
-                st.session_state.rc_model = model
-                st.session_state.rc_result = result
-                st.session_state.pop('rc_sim', None)
-                st.session_state.rc_solve_signature = current_rc_solve_signature
-                st.session_state.pop('rc_sim_signature', None)
+                store_solve_result('rc', model, result, current_rc_solve_signature)
                 if result.get('converged'):
                     st.success("Robinson Crusoe model solved (converged)")
                 else:
@@ -1203,25 +1266,20 @@ elif model_choice == "Model 2: Robinson Crusoe":
         int(random_seed),
         current_rc_solve_signature,
     )
-    rc_prev_sim_signature = st.session_state.get('rc_sim_signature')
-    rc_should_simulate = (
-        simulate_clicked
-        or ('rc_model' in st.session_state and 'rc_sim' not in st.session_state)
-        or rc_prev_sim_signature != current_rc_sim_signature
-    )
+    rc_should_simulate = should_auto_simulate('rc', simulate_clicked, current_rc_sim_signature)
 
     if rc_should_simulate:
         if 'rc_model' not in st.session_state:
             st.warning("Solve the model first before simulating.")
         else:
             with st.spinner("Simulating path..."):
-                st.session_state.rc_sim = st.session_state.rc_model.simulate(
+                rc_sim = st.session_state.rc_model.simulate(
                     T=sim_length,
                     initial_k=initial_k,
                     random_seed=int(random_seed),
                     initial_z_state=0,
                 )
-                st.session_state.rc_sim_signature = current_rc_sim_signature
+                store_sim_result('rc', rc_sim, current_rc_sim_signature)
             st.success("Simulation complete.")
     
     # Display results
@@ -1229,39 +1287,22 @@ elif model_choice == "Model 2: Robinson Crusoe":
         model = st.session_state.rc_model
         result = st.session_state.rc_result
         
-        # Solution Status
-        st.markdown("""
-        <div class="summary-box">
-        <strong>Model Successfully Solved!</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Status", "Converged" if result['converged'] else "Failed")
-        with col2:
-            st.metric("Iterations", result['iterations'])
-        with col3:
-            st.metric("Grid Size", f"{model.n_k} × {model.n_z}")
-        with col4:
-            # Calculate steady state output
-            k_ss = model.k_grid[len(model.k_grid)//2]
-            st.metric("Steady-State K", f"{k_ss:.2f}")
+        k_ss = model.k_grid[len(model.k_grid)//2]
+        render_solution_status([
+            ("Status", "Converged" if result['converged'] else "Failed"),
+            ("Iterations", result['iterations']),
+            ("Grid Size", f"{model.n_k} × {model.n_z}"),
+            ("Steady-State K", f"{k_ss:.2f}"),
+        ])
         
         # Model Summary
         with st.expander("Model Interpretation", expanded=True):
-            st.markdown("""
-            <div class="interpretation-box">
-            <strong>What the Model Shows:</strong>
-            <ul>
-            <li><strong>Building Equipment:</strong> How much to invest in better tools each period</li>
-            <li><strong>Good Days & Bad Days:</strong> When you're more productive, you make more stuff and can invest more</li>
-            <li><strong>Dealing with Ups and Downs:</strong> Using savings to maintain stable consumption despite productivity swings</li>
-            <li><strong>Economic Booms & Busts:</strong> Output, spending, and investment all tend to rise and fall together</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            render_interpretation_box([
+                ("Building Equipment", "How much to invest in better tools each period"),
+                ("Good Days & Bad Days", "When you're more productive, you make more stuff and can invest more"),
+                ("Dealing with Ups and Downs", "Using savings to maintain stable consumption despite productivity swings"),
+                ("Economic Booms & Busts", "Output, spending, and investment all tend to rise and fall together"),
+            ])
         
         st.subheader("Step 5: Model Output")
 
@@ -1372,22 +1413,16 @@ elif model_choice == "Model 2: Robinson Crusoe":
         st.markdown("### 4. Moments Table")
         if 'rc_sim' in st.session_state:
             sim = st.session_state.rc_sim
-            rows = []
-            for name, series in [
-                ("Output", sim['output']),
-                ("Consumption", sim['c']),
-                ("Capital", sim['k'][:-1]),
-            ]:
-                moms = compute_moments(series)
-                corr_val = 1.0 if name == "Output" else compute_correlations(series, sim['output'], name, "Output")['correlation']
-                rows.append({
-                    'Series': name,
-                    'Mean': round(moms['mean'], 4),
-                    'Variance': round(moms['variance'], 4),
-                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
-                    'Corr with Output': round(corr_val, 4),
-                })
-            st.table(pd.DataFrame(rows))
+            render_moments_table(
+                series_specs=[
+                    ("Output", sim['output']),
+                    ("Consumption", sim['c']),
+                    ("Capital", sim['k'][:-1]),
+                ],
+                benchmark_series=sim['output'],
+                benchmark_name="Output",
+                corr_col_label="Corr with Output",
+            )
         else:
             st.info("Run simulation to compute moments table.")
 
@@ -1711,22 +1746,16 @@ elif model_choice == "Model 2: Robinson Crusoe":
 elif model_choice == "Model 3: Endogenous Labor Supply":
     apply_pending_reset_if_needed('ls')
     st.header("Endogenous Labor Supply Model")
-    
-    col1, col2 = st.columns(2)
-    with col1:
-        st.markdown("""
-        **The Problem:** Someone decides how many hours to work and how much to spend 
-        as their hourly wage changes, balancing the desire for money vs. free time.
-        """)
-    
-    with col2:
-        st.markdown("""
-        **Key Features:**
-        - Choosing between work and relaxation
-        - Wages that change unpredictably
-        - Two competing forces: "work more when paid more" vs. "I can afford to work less"
-        - How responsive work hours are to wage changes
-        """)
+    render_model_intro(
+        "Someone decides how many hours to work and how much to spend "
+        "as their hourly wage changes, balancing the desire for money vs. free time.",
+        [
+            "Choosing between work and relaxation",
+            "Wages that change unpredictably",
+            "Two competing forces: 'work more when paid more' vs. 'I can afford to work less'",
+            "How responsive work hours are to wage changes",
+        ],
+    )
     
     # Sidebar parameters
     st.sidebar.subheader("Step 2: Adjust Economic Parameters")
@@ -1778,19 +1807,8 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
     # Compatibility parameters when custom wage process is provided
     rho = 0.0
     sigma_w = 0.1
-    
-    solve_clicked = False
-    simulate_clicked = False
-    with st.sidebar.expander("Section 6: Run Controls", expanded=True):
-        solve_clicked = st.button("Solve model", key="ls_solve", use_container_width=True)
-        simulate_clicked = st.button("Simulate path", key="ls_simulate_sidebar", use_container_width=True)
-        st.button(
-            "Reset to defaults",
-            key="ls_reset_defaults",
-            use_container_width=True,
-            on_click=queue_model_reset,
-            args=('ls',),
-        )
+
+    solve_clicked, simulate_clicked = render_run_controls('ls')
 
     current_ls_solve_signature = (
         round(float(beta), 8),
@@ -1804,12 +1822,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         round(float(p_stay_low), 8),
         round(float(p_stay_high), 8),
     )
-    ls_prev_solve_signature = st.session_state.get('ls_solve_signature')
-    ls_should_solve = (
-        solve_clicked
-        or 'ls_model' not in st.session_state
-        or ls_prev_solve_signature != current_ls_solve_signature
-    )
+    ls_should_solve = should_auto_solve('ls', solve_clicked, current_ls_solve_signature)
 
     # Solve model (auto-runs when sidebar parameters change)
     if ls_should_solve:
@@ -1830,11 +1843,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 ls_tol = 5e-5 if high_accuracy else 1e-4
                 ls_max_iter = 350 if high_accuracy else 250
                 result = model.solve(tol=ls_tol, max_iter=ls_max_iter, verbose=False)
-                st.session_state.ls_model = model
-                st.session_state.ls_result = result
-                st.session_state.pop('ls_sim', None)
-                st.session_state.ls_solve_signature = current_ls_solve_signature
-                st.session_state.pop('ls_sim_signature', None)
+                store_solve_result('ls', model, result, current_ls_solve_signature)
                 if result.get('converged'):
                     st.success("Labor Supply model solved (converged)")
                 else:
@@ -1851,12 +1860,7 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         int(random_seed),
         current_ls_solve_signature,
     )
-    ls_prev_sim_signature = st.session_state.get('ls_sim_signature')
-    ls_should_simulate = (
-        simulate_clicked
-        or ('ls_model' in st.session_state and 'ls_sim' not in st.session_state)
-        or ls_prev_sim_signature != current_ls_sim_signature
-    )
+    ls_should_simulate = should_auto_simulate('ls', simulate_clicked, current_ls_sim_signature)
 
     if ls_should_simulate:
         if 'ls_model' not in st.session_state:
@@ -1864,13 +1868,13 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         else:
             with st.spinner("Simulating path..."):
                 init_w_idx = 0 if initial_wage_state == "Low" else 1
-                st.session_state.ls_sim = st.session_state.ls_model.simulate(
+                ls_sim = st.session_state.ls_model.simulate(
                     T=sim_length,
                     initial_a=initial_a,
                     random_seed=int(random_seed),
                     initial_w_state=init_w_idx,
                 )
-                st.session_state.ls_sim_signature = current_ls_sim_signature
+                store_sim_result('ls', ls_sim, current_ls_sim_signature)
             st.success("Simulation complete.")
     
     # Display results
@@ -1878,37 +1882,21 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         model = st.session_state.ls_model
         result = st.session_state.ls_result
         
-        # Solution Status
-        st.markdown("""
-        <div class="summary-box">
-        <strong>Model Successfully Solved!</strong>
-        </div>
-        """, unsafe_allow_html=True)
-        
-        # Key metrics
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            st.metric("Status", "Converged" if result['converged'] else "Failed")
-        with col2:
-            st.metric("Iterations", result['iterations'])
-        with col3:
-            st.metric("Grid Size", f"{model.n_a} × {model.n_w}")
-        with col4:
-            st.metric("Elasticity", f"{eta:.2f}")
+        render_solution_status([
+            ("Status", "Converged" if result['converged'] else "Failed"),
+            ("Iterations", result['iterations']),
+            ("Grid Size", f"{model.n_a} × {model.n_w}"),
+            ("Elasticity", f"{eta:.2f}"),
+        ])
         
         # Model Summary
         with st.expander("Model Interpretation", expanded=True):
-            st.markdown("""
-            <div class="interpretation-box">
-            <strong>What the Model Shows:</strong>
-            <ul>
-            <li><strong>Wealth Effect:</strong> When wages rise, you might work less because you're richer</li>
-            <li><strong>Opportunity Cost Effect:</strong> When wages rise, each hour of leisure is more "expensive," so you might work more</li>
-            <li><strong>Which Wins?:</strong> The balance between these two forces (controlled by the elasticity parameter)</li>
-            <li><strong>Savings Buffer:</strong> Building savings helps keep spending stable despite changing wages</li>
-            </ul>
-            </div>
-            """, unsafe_allow_html=True)
+            render_interpretation_box([
+                ("Wealth Effect", "When wages rise, you might work less because you're richer"),
+                ("Opportunity Cost Effect", "When wages rise, each hour of leisure is more 'expensive,' so you might work more"),
+                ("Which Wins?", "The balance between these two forces (controlled by the elasticity parameter)"),
+                ("Savings Buffer", "Building savings helps keep spending stable despite changing wages"),
+            ])
         
         st.subheader("Step 5: Model Output")
 
@@ -2048,24 +2036,18 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
         st.markdown("### 4. Moments Table")
         if 'ls_sim' in st.session_state:
             sim = st.session_state.ls_sim
-            rows = []
-            for name, series in [
-                ("Consumption", sim['c']),
-                ("Savings/Assets", sim['a'][:-1]),
-                ("Labor", sim['l']),
-                ("Wage", sim['w']),
-                ("Income", sim['y']),
-            ]:
-                moms = compute_moments(series)
-                corr_val = 1.0 if name == "Income" else compute_correlations(series, sim['y'], name, "Income")['correlation']
-                rows.append({
-                    'Series': name,
-                    'Mean': round(moms['mean'], 4),
-                    'Variance': round(moms['variance'], 4),
-                    'Autocorr(1)': round(moms['autocorr_lag1'], 4),
-                    'Corr with Income': round(corr_val, 4),
-                })
-            st.table(pd.DataFrame(rows))
+            render_moments_table(
+                series_specs=[
+                    ("Consumption", sim['c']),
+                    ("Savings/Assets", sim['a'][:-1]),
+                    ("Labor", sim['l']),
+                    ("Wage", sim['w']),
+                    ("Income", sim['y']),
+                ],
+                benchmark_series=sim['y'],
+                benchmark_name="Income",
+                corr_col_label="Corr with Income",
+            )
         else:
             st.info("Run simulation to compute moments table.")
 
