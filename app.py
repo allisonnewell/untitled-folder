@@ -721,18 +721,18 @@ if model_choice == "Model 1: Consumption-Savings":
             "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
         ])
 
-        st.markdown("### 1. Model Description")
+        st.markdown("### 1. Policy Functions")
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current assets and the income state affect optimal current consumption and next-period savings."
+        )
+
+        st.markdown("### 2. Model Description")
         st.markdown(
             "**What you start with:** Current savings and whether income is high or low today. "
             "**What you choose:** How much to spend now and how much to save for later. "
             "**What's uncertain:** Income randomly switches between high and low states. "
             "**The tradeoff:** Enjoy spending money today vs. having a cushion for uncertain future income."
-        )
-
-        st.markdown("### 2. Policy Functions")
-        st.caption(
-            "Detailed policy charts are shown once in the Policy Functions tab above. "
-            "For this model, they show how current assets and the income state affect optimal current consumption and next-period savings."
         )
 
         st.markdown("### Static Intuition")
@@ -1293,18 +1293,18 @@ elif model_choice == "Model 2: Robinson Crusoe":
             "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
         ])
 
-        st.markdown("### 1. Model Description")
+        st.markdown("### 1. Policy Functions")
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current capital and the productivity state affect optimal consumption and next-period capital."
+        )
+
+        st.markdown("### 2. Model Description")
         st.markdown(
             "**What you start with:** Current equipment level and whether today is a 'good productivity day' or 'bad productivity day'. "
             "**What you choose:** How much output to consume now vs. invest in better equipment. "
             "**What's uncertain:** Productivity randomly switches between good days and bad days. "
             "**The tradeoff:** Enjoy consumption today vs. build better equipment for more production tomorrow."
-        )
-
-        st.markdown("### 2. Policy Functions")
-        st.caption(
-            "Detailed policy charts are shown once in the Policy Functions tab above. "
-            "For this model, they show how current capital and the productivity state affect optimal consumption and next-period capital."
         )
 
         st.markdown("### Static Intuition")
@@ -1868,18 +1868,18 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
             "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
         ])
 
-        st.markdown("### 1. Model Description")
+        st.markdown("### 1. Policy Functions")
+        st.caption(
+            "Detailed policy charts are shown once in the Policy Functions tab above. "
+            "For this model, they show how current assets and the wage state affect optimal consumption, labor, leisure, and next-period savings."
+        )
+
+        st.markdown("### 2. Model Description")
         st.markdown(
             "**What you start with:** Current savings and whether wages are high or low today. "
             "**What you choose:** How much to spend, how many hours to work, and how much to save. "
             "**What's uncertain:** Wages randomly switch between high and low. "
             "**The tradeoff:** Enjoying consumption and free time today vs. building savings for an uncertain wage future."
-        )
-
-        st.markdown("### 2. Policy Functions")
-        st.caption(
-            "Detailed policy charts are shown once in the Policy Functions tab above. "
-            "For this model, they show how current assets and the wage state affect optimal consumption, labor, leisure, and next-period savings."
         )
 
         st.markdown("### Static Intuition")
