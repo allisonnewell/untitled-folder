@@ -713,7 +713,10 @@ if model_choice == "Model 1: Consumption-Savings":
                 ("Can't Borrow", "When you have little saved, you can't spend more than you earn"),
             ])
         
-        st.subheader("Step 5: Model Output")
+        st.subheader("Model Output")
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
+        ])
 
         st.markdown("### 1. Model Description")
         st.markdown(
@@ -876,10 +879,6 @@ if model_choice == "Model 1: Consumption-Savings":
 
         st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
 
-        # Tabs for different views
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
-        
         with tab1:
             st.subheader("Policy Functions")
             shock_labels = ["Low Income State", "High Income State"] if model.n_y == 2 else None
@@ -1304,7 +1303,10 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 ("Economic Booms & Busts", "Output, spending, and investment all tend to rise and fall together"),
             ])
         
-        st.subheader("Step 5: Model Output")
+        st.subheader("Model Output")
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
+        ])
 
         st.markdown("### 1. Model Description")
         st.markdown(
@@ -1478,10 +1480,6 @@ elif model_choice == "Model 2: Robinson Crusoe":
 
         st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
 
-        # Tabs
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
-        
         with tab1:
             st.subheader("Policy Functions")
             shock_labels = ["Low TFP", "High TFP"] if model.n_z == 2 else None
@@ -1898,7 +1896,10 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 ("Savings Buffer", "Building savings helps keep spending stable despite changing wages"),
             ])
         
-        st.subheader("Step 5: Model Output")
+        st.subheader("Model Output")
+        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs([
+            "Policy Functions", "Value Function", "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"
+        ])
 
         st.markdown("### 1. Model Description")
         st.markdown(
@@ -2110,10 +2111,6 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
 
         st.markdown("<div class='panel-spacer'></div>", unsafe_allow_html=True)
 
-        # Tabs
-        tab1, tab2, tab3, tab4, tab5, tab6, tab7 = st.tabs(["Policy Functions", "Value Function", 
-                            "Simulation", "Analysis", "Summary Statistics", "Forecast Panel", "Download"])
-        
         with tab1:
             st.subheader("Policy Functions")
             shock_labels = ["Low Wage State", "High Wage State"] if model.n_w == 2 else None
