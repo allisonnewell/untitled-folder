@@ -662,7 +662,10 @@ if model_choice == "Model 1: Consumption-Savings":
                 if result.get('converged'):
                     st.success("Consumption-Savings model solved (converged)")
                 else:
-                    st.warning("Model solved but did not converge within max iterations")
+                    st.warning(
+                        f"Model solved but did not converge within max iterations. "
+                        f"Final convergence gap: {result.get('final_diff', float('nan')):.6g}"
+                    )
             except Exception as e:
                 st.error(f"Error solving model: {e}")
                 import traceback
@@ -1254,7 +1257,10 @@ elif model_choice == "Model 2: Robinson Crusoe":
                 if result.get('converged'):
                     st.success("Robinson Crusoe model solved (converged)")
                 else:
-                    st.warning("Model solved but did not converge within max iterations")
+                    st.warning(
+                        f"Model solved but did not converge within max iterations. "
+                        f"Final convergence gap: {result.get('final_diff', float('nan')):.6g}"
+                    )
             except Exception as e:
                 st.error(f"Error solving model: {e}")
                 import traceback
@@ -1847,7 +1853,10 @@ elif model_choice == "Model 3: Endogenous Labor Supply":
                 if result.get('converged'):
                     st.success("Labor Supply model solved (converged)")
                 else:
-                    st.warning("Model solved but did not converge within max iterations")
+                    st.warning(
+                        f"Model solved but did not converge within max iterations. "
+                        f"Final convergence gap: {result.get('final_diff', float('nan')):.6g}"
+                    )
             except Exception as e:
                 st.error(f"Error solving model: {e}")
                 import traceback
